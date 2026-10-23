@@ -1,0 +1,4 @@
+# Optional local EmbeddingGemma 2 evaluation dependencies.
+# Install in the backend environment; PyTorch may need a hardware-specific wheel.
+sentence-transformers[image]>=5.1.0
+psutil>=5.9.8

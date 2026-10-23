@@ -14,13 +14,13 @@ It retrieves matching files through a **5-signal hybrid retrieval pipeline** (ve
 
 ---
 
-## 👥 Team Setup & Quick Start
+## 👥 Setup & Quick Start
 
-The repository is private and shared with teammates. **Do NOT commit real API keys to Git.**
+Welcome to ReFind! Do NOT commit real API keys to Git.
 
 ### 1. Clone the Repository
 ```bash
-git clone <repository-url>
+git clone https://github.com/joyelshajii/ReFind.git
 cd ReFind
 ```
 
@@ -172,4 +172,11 @@ Run the full pytest suite from the `backend/` directory:
 cd backend
 python -m pytest tests/test_refind.py -v
 python -m pytest tests/test_ai_pipeline.py -v
+python -m pytest tests/test_image_pipeline.py -v
 ```
+
+### Image Search Benchmark (Phase 3)
+
+Image indexing keeps Gemini vision analysis enabled by default; set `IMAGE_VISION_ENABLED=false` to disable descriptions while retaining local OCR. Image processing reuses decoded pixels, hashes, OCR results, and identical embedding requests where safe. It logs stage timings, throughput, memory, and failures without changing the indexing API response.
+
+To compare the current description-and-text-embedding path with direct local EmbeddingGemma 2 image embeddings, follow [the Phase 3 benchmark procedure](backend/docs/phase3_image_benchmark.md). The optional dependencies are listed in `backend/requirements-image-benchmark.txt`. Direct model measurements are pending until run in an environment with the model dependencies and weights available.

@@ -270,6 +270,30 @@ def test_gemini_image_resize_and_vision_results_are_reused(monkeypatch):
     assert len(image_processor._resized_image_cache) == 1
 
 
+def test_vision_cache_distinguishes_image_and_model(monkeypatch):
+    image_processor._vision_result_cache.clear()
+    image_processor._resized_image_cache.clear()
+    monkeypatch.setattr(image_processor.settings, "IMAGE_VISION_ENABLED", True)
+    monkeypatch.setattr(image_processor.settings, "GEMINI_API_KEY", "unit-test-key")
+    monkeypatch.setattr(image_processor.settings, "GEMINI_MODEL", "vision-model-a")
+    calls = []
+
+    def fake_analysis(payload, model):
+        calls.append((payload, model))
+        return {"visual_description": model, "detected_text": [], "entities": []}
+
+    monkeypatch.setattr(image_processor, "_analyze_image_payload_with_gemini", fake_analysis)
+    first = Image.new("RGB", (20, 20), color="red")
+    different_image = Image.new("RGB", (20, 20), color="blue")
+    image_processor._analyze_image_with_gemini(first)
+    image_processor._analyze_image_with_gemini(different_image)
+    monkeypatch.setattr(image_processor.settings, "GEMINI_MODEL", "vision-model-b")
+    image_processor._analyze_image_with_gemini(first)
+
+    assert len(calls) == 3
+    assert {model for _, model in calls} == {"vision-model-a", "vision-model-b"}
+
+
 def test_image_processing_signature_tracks_companion_metadata(tmp_path, monkeypatch):
     image_path = tmp_path / "diagram.png"
     image_path.write_bytes(b"same-image-bytes")
