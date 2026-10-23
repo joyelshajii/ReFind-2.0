@@ -1,7 +1,7 @@
 import logging
 import json
 from typing import Generator
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from app.core.config import settings
 
@@ -64,18 +64,21 @@ def init_db():
     from app.db import models
     Base.metadata.create_all(bind=engine)
     
-    # Safe lightweight migration for missing columns on existing SQLite/Postgres DB
+    # Safe lightweight migrations for existing SQLite/Postgres installations.
+    # Inspect first instead of relying on a failed ALTER TABLE, which can leave
+    # PostgreSQL's transaction aborted for the remaining migration statements.
     with engine.connect() as conn:
-        try:
+        document_columns = {column["name"] for column in inspect(conn).get_columns("documents")}
+        if "file_hash" not in document_columns:
             conn.execute(text("ALTER TABLE documents ADD COLUMN file_hash VARCHAR(64) DEFAULT '';"))
             conn.commit()
-        except Exception:
-            pass # Already exists
+        if "processing_signature" not in document_columns:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN processing_signature VARCHAR(512) DEFAULT '';"))
+            conn.commit()
 
-        try:
+        chunk_columns = {column["name"] for column in inspect(conn).get_columns("chunks")}
+        if "chunk_index" not in chunk_columns:
             conn.execute(text("ALTER TABLE chunks ADD COLUMN chunk_index INTEGER DEFAULT 0;"))
             conn.commit()
-        except Exception:
-            pass # Already exists
 
     logger.info("Database tables and migration verified/created.")

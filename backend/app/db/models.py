@@ -20,6 +20,7 @@ class Document(Base):
     file_type = Column(String(64), nullable=False, index=True) # pdf, docx, pptx, txt, png, etc.
     file_size = Column(BigInteger, default=0)
     file_hash = Column(String(64), default="", index=True) # SHA-256 hash for unchanged-document caching
+    processing_signature = Column(String(512), default="") # content processing + embedding configuration version
     created_at = Column(DateTime, default=datetime.utcnow)
     modified_at = Column(DateTime, default=datetime.utcnow)
     source = Column(String(128), default="local") # local, upload, etc.

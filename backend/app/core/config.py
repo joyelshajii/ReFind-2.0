@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     GEMINI_REASONING_MODEL: str = "gemini-3.8-flash"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-2"
+    IMAGE_VISION_ENABLED: bool = True
     OPENAI_API_KEY: str = ""
     
     # Chunking Configuration
