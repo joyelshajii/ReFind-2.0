@@ -2,6 +2,8 @@ import math
 import hashlib
 import re
 import logging
+import threading
+from collections import OrderedDict
 from typing import List, Optional
 import numpy as np
 import httpx
@@ -12,6 +14,11 @@ logger = logging.getLogger("refind.services.embedding")
 DIMENSION = settings.EMBEDDING_DIMENSION  # Default 768
 JINA_EMBEDDINGS_URL = "https://api.jina.ai/v1/embeddings"
 JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
+_EMBEDDING_CACHE_LIMIT = 1024
+_embedding_cache = OrderedDict()
+_local_embedding_cache = OrderedDict()
+_embedding_cache_lock = threading.RLock()
+_embedding_key_locks = {}
 
 def _local_semantic_vector(text: str, dim: int = DIMENSION) -> List[float]:
     """
@@ -108,28 +115,81 @@ def _embed_jina(text: str, task: str = "retrieval.passage") -> Optional[List[flo
         return None
     return None
 
-def embed_text(text: str) -> List[float]:
+def embed_text(text: str, task: str = "retrieval.passage") -> List[float]:
     """
     Core embedding interface: embed_text(text) -> vector (768-d).
     Uses Gemini Embedding 2 when configured, with robust local fallback.
     """
-    if settings.EMBEDDING_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
-        vec = _embed_gemini(text, dim=DIMENSION)
-        if vec is not None and len(vec) == DIMENSION:
-            return vec
+    provider = settings.EMBEDDING_PROVIDER.lower()
+    # Hash input text so bounded cache keys do not retain document contents.
+    gemini_key_id = hashlib.sha256(settings.GEMINI_API_KEY.encode()).hexdigest()[:16] if settings.GEMINI_API_KEY else ""
+    jina_key_id = hashlib.sha256(settings.JINA_API_KEY.encode()).hexdigest()[:16] if settings.JINA_API_KEY else ""
+    text_hash = hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+    # Jina's query and passage task prompts are part of the embedding
+    # configuration. Keep them separate in the cache and honor the task passed
+    # by search_documents; Gemini uses its shared text embedding interface.
+    effective_task = task if provider == "jina" else ""
+    key = (
+        provider, settings.GEMINI_EMBEDDING_MODEL, settings.JINA_EMBEDDING_MODEL,
+        DIMENSION, settings.JINA_EMBEDDING_DIMENSION, effective_task,
+        gemini_key_id, jina_key_id, text_hash,
+    )
 
-    if settings.EMBEDDING_PROVIDER.lower() == "jina" and settings.JINA_API_KEY:
-        vec = _embed_jina(text)
-        if vec is not None:
-            return vec
+    with _embedding_cache_lock:
+        cached = _embedding_cache.get(key)
+        if cached is not None:
+            _embedding_cache.move_to_end(key)
+            return list(cached)
+        remote_enabled = (provider == "gemini" and bool(settings.GEMINI_API_KEY)) or (
+            provider == "jina" and bool(settings.JINA_API_KEY)
+        )
+        key_lock = _embedding_key_locks.setdefault(key, threading.Lock()) if remote_enabled else None
 
-    return _local_semantic_vector(text, dim=DIMENSION)
+    if key_lock is not None:
+        with key_lock:
+            with _embedding_cache_lock:
+                cached = _embedding_cache.get(key)
+                if cached is not None:
+                    _embedding_cache.move_to_end(key)
+                    _embedding_key_locks.pop(key, None)
+                    return list(cached)
+
+            if provider == "gemini":
+                vector = _embed_gemini(text or "", dim=DIMENSION)
+                valid = vector is not None and len(vector) == DIMENSION
+            else:
+                vector = _embed_jina(text or "", task=effective_task)
+                valid = vector is not None and len(vector) == settings.JINA_EMBEDDING_DIMENSION
+            with _embedding_cache_lock:
+                _embedding_key_locks.pop(key, None)
+                if valid:
+                    _embedding_cache[key] = tuple(vector)
+                    _embedding_cache.move_to_end(key)
+                    while len(_embedding_cache) > _EMBEDDING_CACHE_LIMIT:
+                        _embedding_cache.popitem(last=False)
+                    return list(vector)
+
+    # Keep remote failures retryable and cache only the deterministic local
+    # fallback, with a text hash as its key rather than plaintext content.
+    local_key = (text_hash, DIMENSION)
+    with _embedding_cache_lock:
+        cached_local = _local_embedding_cache.get(local_key)
+        if cached_local is not None:
+            _local_embedding_cache.move_to_end(local_key)
+            return list(cached_local)
+    vector = tuple(_local_semantic_vector(text or "", dim=DIMENSION))
+    with _embedding_cache_lock:
+        _local_embedding_cache[local_key] = vector
+        _local_embedding_cache.move_to_end(local_key)
+        while len(_local_embedding_cache) > _EMBEDDING_CACHE_LIMIT:
+            _local_embedding_cache.popitem(last=False)
+    return list(vector)
 
 def get_embedding(text: str, task: str = "retrieval.passage") -> List[float]:
     """
     Backward-compatible alias for existing codebase callers.
     """
-    return embed_text(text)
+    return embed_text(text, task=task)
 
 def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     """

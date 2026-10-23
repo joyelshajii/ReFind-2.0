@@ -9,7 +9,10 @@ from app.db.models import Document, Chunk
 from app.schemas.index import IndexFolderRequest, IndexProgressStatus, IndexResponse
 from app.connectors.local_source import LocalFileSource
 from app.processors.factory import SUPPORTED_EXTENSIONS
-from app.services.indexer import indexing_status, index_folder_background, index_single_file
+from app.services.indexer import (
+    indexing_status, index_folder_background, index_single_file,
+    try_reserve_indexing_run,
+)
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/index", tags=["Indexing"])
@@ -58,7 +61,13 @@ def trigger_index(
         )
 
     # Start background processing
-    background_tasks.add_task(index_folder_background, str(target_path.resolve()))
+    if not try_reserve_indexing_run():
+        return IndexResponse(
+            status="busy",
+            message="Indexing is already in progress.",
+            files_found=indexing_status.total_files,
+        )
+    background_tasks.add_task(index_folder_background, str(target_path.resolve()), True)
 
     return IndexResponse(
         status="started",
