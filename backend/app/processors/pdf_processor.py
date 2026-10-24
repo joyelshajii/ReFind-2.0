@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, Any, List
 from pathlib import Path
 import fitz # PyMuPDF
@@ -16,7 +17,13 @@ def process_pdf(file_path: str) -> Dict[str, Any]:
     chunks: List[Dict[str, Any]] = []
     full_text_parts: List[str] = []
     metadata: Dict[str, Any] = {}
+    timings = {
+        "pdf_text_extraction_seconds": 0.0,
+        "pdf_render_seconds": 0.0,
+        "pdf_ocr_seconds": 0.0,
+    }
 
+    doc = None
     try:
         doc = fitz.open(str(path))
         
@@ -31,14 +38,22 @@ def process_pdf(file_path: str) -> Dict[str, Any]:
 
         for idx, page in enumerate(doc):
             page_num = idx + 1
+            text_started = time.perf_counter()
             page_text = page.get_text() or ""
+            timings["pdf_text_extraction_seconds"] += time.perf_counter() - text_started
             cleaned = page_text.strip()
 
             # If page text is minimal, check if page is a scanned image
             if len(cleaned) < 30:
                 try:
+                    render_started = time.perf_counter()
                     pix = page.get_pixmap(dpi=150)
-                    ocr_res = ocr_service.extract_text_from_scanned_pdf_page(pix)
+                    timings["pdf_render_seconds"] += time.perf_counter() - render_started
+                    ocr_started = time.perf_counter()
+                    try:
+                        ocr_res = ocr_service.extract_text_from_scanned_pdf_page(pix)
+                    finally:
+                        timings["pdf_ocr_seconds"] += time.perf_counter() - ocr_started
                     if ocr_res and len(ocr_res.strip()) > len(cleaned):
                         cleaned = ocr_res.strip()
                 except Exception as oe:
@@ -56,11 +71,20 @@ def process_pdf(file_path: str) -> Dict[str, Any]:
                     })
         doc.close()
     except Exception as e:
-        logger.error(f"PyMuPDF error processing PDF {file_path}: {e}")
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                logger.warning("Unable to close damaged PDF %s", path.name, exc_info=True)
+        logger.exception("Unable to process PDF %s", path.name)
+        raise RuntimeError(
+            f"Unable to read PDF '{path.name}'. The file may be damaged or password-protected."
+        ) from e
 
     extracted_text = "\n\n".join(full_text_parts)
     return {
         "extracted_text": extracted_text,
         "chunks": chunks,
-        "metadata": metadata
+        "metadata": metadata,
+        "timings": timings,
     }

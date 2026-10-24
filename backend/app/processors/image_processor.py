@@ -6,7 +6,8 @@ import hashlib
 import time
 import threading
 from collections import OrderedDict
-from contextlib import nullcontext
+from contextlib import nullcontext, ExitStack
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from PIL import Image
@@ -14,11 +15,19 @@ from PIL.ExifTags import TAGS
 from app.core.config import settings
 
 logger = logging.getLogger("refind.processors.image")
+_image_embedding_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="refind-image")
+
+
+def _embed_image_timed(image):
+    from app.services.embedding_service import embed_image_with_provenance
+    started = time.perf_counter()
+    vector, provenance = embed_image_with_provenance(image)
+    return vector, provenance, time.perf_counter() - started
 
 # Bump this when image extraction, OCR, or the Gemini prompt changes. The
 # indexer stores this alongside the content hash so a stale extraction is
 # refreshed once without relying on text markers in its output.
-IMAGE_PROCESSOR_VERSION = 2
+IMAGE_PROCESSOR_VERSION = 4
 _RESIZED_IMAGE_CACHE_LIMIT = 16
 _resized_image_cache = OrderedDict()
 _resized_image_cache_lock = threading.RLock()
@@ -28,12 +37,36 @@ _vision_result_cache = OrderedDict()
 _vision_result_cache_lock = threading.RLock()
 _vision_key_locks = {}
 
-# Register HEIF/HEIC opener support if pillow-heif is available
+# Register HEIF/HEIC support without decoding a small embedded thumbnail.
+_heif_registration_error = None
+_heif_registered = False
+_heif_registration_lock = threading.Lock()
 try:
     import pillow_heif
-    pillow_heif.register_heif_opener()
-except Exception:
-    pass
+    pillow_heif.register_heif_opener(thumbnails=False)
+    _heif_registered = True
+except Exception as error:
+    _heif_registration_error = error
+
+
+def ensure_heif_opener() -> None:
+    """Retry registration if pillow-heif was installed after this worker started."""
+    global _heif_registered, _heif_registration_error
+    if _heif_registered:
+        return
+    with _heif_registration_lock:
+        if _heif_registered:
+            return
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener(thumbnails=False)
+        except Exception as error:
+            _heif_registration_error = error
+            raise RuntimeError(
+                "HEIC/HEIF decoding requires pillow-heif in the backend virtual environment."
+            ) from error
+        _heif_registered = True
+        _heif_registration_error = None
 
 _rapid_ocr = None
 
@@ -43,7 +76,8 @@ def _get_rapid_ocr():
         try:
             from rapidocr_onnxruntime import RapidOCR
             _rapid_ocr = RapidOCR()
-        except Exception:
+        except Exception as error:
+            logger.warning("Optional RapidOCR initialization failed; continuing without this OCR engine: %s", error)
             _rapid_ocr = False
     return _rapid_ocr if _rapid_ocr else None
 
@@ -178,7 +212,7 @@ def _cached_gemini_vision(cache_key: str, model_name: str, image_bytes: bytes) -
 
 def _analyze_image_with_gemini(img: Image.Image) -> tuple[Dict[str, Any], Dict[str, float]]:
     """Resize/encode once, and reuse a response for identical model inputs."""
-    if not settings.IMAGE_VISION_ENABLED or not settings.GEMINI_API_KEY:
+    if settings.LOCAL_FAST_MODE or not settings.IMAGE_VISION_ENABLED or not settings.GEMINI_API_KEY:
         return {}, {"vision_preprocess_seconds": 0.0, "vision_seconds": 0.0}
     try:
         preprocess_started = time.perf_counter()
@@ -237,18 +271,24 @@ def process_image(file_path: str, image: Optional[Image.Image] = None) -> Dict[s
     ocr_lines: List[str] = []
     visual_description: str = ""
     discovered_entities: List[Dict[str, str]] = []
+    image_embedding = None
+    image_embedding_provenance = None
     timings = {
         "decode_metadata_seconds": 0.0,
         "vision_preprocess_seconds": 0.0,
         "vision_seconds": 0.0,
         "ocr_seconds": 0.0,
+        "image_embedding_seconds": 0.0,
     }
 
     decode_started = time.perf_counter()
     try:
+        if path.suffix.lower() in {".heic", ".heif"}:
+            ensure_heif_opener()
         image_context = Image.open(str(path)) if image is None else nullcontext(image)
-        with image_context as img:
+        with image_context as img, ExitStack() as pending_work:
             img.load()
+            ocr_image = img if img.mode == "RGB" else img.convert("RGB")
             metadata["dimensions"] = f"{img.width}x{img.height}"
             metadata["format"] = img.format or path.suffix.lstrip(".").upper()
 
@@ -279,6 +319,14 @@ def process_image(file_path: str, image: Optional[Image.Image] = None) -> Dict[s
 
             timings["decode_metadata_seconds"] = time.perf_counter() - decode_started
 
+            # CPU OCR and GPU vision embedding consume the same read-only
+            # decoded pixels independently. Join before closing the image,
+            # including on errors; only one image embedding worker exists.
+            image_future = None
+            if settings.LOCAL_FAST_MODE:
+                image_future = _image_embedding_pool.submit(_embed_image_timed, ocr_image)
+                pending_work.callback(image_future.result)
+
             # 1. AI Multimodal Vision Analysis (visual description + entities).
             ai_result, vision_timings = _analyze_image_with_gemini(img)
             timings.update(vision_timings)
@@ -296,14 +344,17 @@ def process_image(file_path: str, image: Optional[Image.Image] = None) -> Dict[s
                             "entity_value": tag
                         })
 
-            # Local OCR remains the exact-text fallback whenever vision did
-            # not produce text, while avoiding a second OCR pass for images
-            # where Gemini already returned a transcription.
-            if not ocr_lines:
+            # There is no reliable signal that a vision transcription is
+            # complete. Supplement mode (default) merges local OCR lines;
+            # fallback mode preserves the faster prior behavior.
+            run_local_ocr = (
+                not ocr_lines or settings.IMAGE_OCR_POLICY == "supplement"
+            )
+            if run_local_ocr:
                 ocr_started = time.perf_counter()
                 try:
                     from app.services.ocr_service import ocr_service
-                    local_lines = ocr_service.extract_text_from_image(img)
+                    local_lines = ocr_service.extract_text_from_image(ocr_image)
                     for line in local_lines:
                         clean_line = _clean_str(line)
                         if clean_line and clean_line not in ocr_lines:
@@ -314,7 +365,7 @@ def process_image(file_path: str, image: Optional[Image.Image] = None) -> Dict[s
                     timings["ocr_seconds"] = time.perf_counter() - ocr_started
 
                 # RapidOCR fallback also consumes the already-decoded pixels.
-                if not ocr_lines:
+                if not ocr_lines and not settings.LOCAL_FAST_MODE:
                     rapid_ocr = _get_rapid_ocr()
                     if rapid_ocr:
                         try:
@@ -329,9 +380,15 @@ def process_image(file_path: str, image: Optional[Image.Image] = None) -> Dict[s
                         except Exception as rapid_err:
                             logger.debug("RapidOCR skipped for %s: %s", path.name, rapid_err)
 
+            # In local-fast mode, reuse the decoded image for its direct
+            # multimodal vector. Gemini remains available in normal mode.
+            if settings.LOCAL_FAST_MODE:
+                image_embedding, image_embedding_provenance, image_seconds = image_future.result()
+                timings["image_embedding_seconds"] = image_seconds
+
     except Exception as e:
         logger.error(f"Error opening image {file_path}: {e}")
-        timings["decode_metadata_seconds"] = time.perf_counter() - decode_started
+        raise
 
     # Check companion metadata file if exists (e.g. for demo dataset: IMG_2384.png.meta.json)
     companion_meta = path.with_suffix(path.suffix + ".meta.json")
@@ -390,4 +447,6 @@ def process_image(file_path: str, image: Optional[Image.Image] = None) -> Dict[s
         "entities": discovered_entities,
         "timings": timings,
         "ocr_text": "\n".join(ocr_lines),
+        "image_embedding": image_embedding,
+        "image_embedding_provenance": image_embedding_provenance,
     }

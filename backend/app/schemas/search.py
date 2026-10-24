@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class SearchRequest(BaseModel):
-    query: str
-    top_k: int = 10
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=10, ge=1, le=100)
 
 class QueryClues(BaseModel):
     raw_query: str

@@ -10,17 +10,24 @@ import {
   ShieldCheck,
   Clock
 } from "lucide-react";
-import { getIndexStats, getHealth } from "@/lib/api";
+import { getErrorMessage, getIndexStats, getHealth } from "@/lib/api";
 import { IndexStats } from "@/types";
 
 export default function SettingsPage() {
   const [stats, setStats] = useState<IndexStats | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [health, setHealth] = useState<any>(null);
 
   useEffect(() => {
     getIndexStats()
-      .then((data) => setStats(data))
-      .catch((err) => console.error("Error fetching stats:", err));
+      .then((data) => {
+        setStats(data);
+        setStatsError(null);
+      })
+      .catch((err: unknown) => {
+        console.error("Error fetching stats:", err);
+        setStatsError(getErrorMessage(err, "Index statistics are unavailable."));
+      });
 
     getHealth()
       .then((data) => setHealth(data))
@@ -81,7 +88,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="text-sm font-mono text-zinc-300 font-medium">
-            {stats ? `${stats.total_documents} documents indexed` : "Ready"}
+            {stats ? `${stats.total_documents} documents indexed` : statsError ? "Unavailable" : "Ready"}
           </div>
         </div>
 
@@ -139,7 +146,7 @@ export default function SettingsPage() {
               Total Documents
             </span>
             <span className="text-2xl sm:text-3xl font-bold text-white mt-1.5 block">
-              {stats?.total_documents ?? 0}
+              {stats?.total_documents ?? (statsError ? "—" : 0)}
             </span>
           </div>
 
@@ -148,7 +155,7 @@ export default function SettingsPage() {
               Indexed Chunks
             </span>
             <span className="text-2xl sm:text-3xl font-bold text-white mt-1.5 block">
-              {stats?.total_chunks ?? 0}
+              {stats?.total_chunks ?? (statsError ? "—" : 0)}
             </span>
           </div>
 
@@ -157,7 +164,7 @@ export default function SettingsPage() {
               Vector Dimension
             </span>
             <span className="text-2xl sm:text-3xl font-bold text-white mt-1.5 block">
-              {stats?.embedding_dimension ?? 384}d
+              {stats ? `${stats.embedding_dimension}d` : statsError ? "—" : "384d"}
             </span>
           </div>
 
@@ -166,7 +173,7 @@ export default function SettingsPage() {
               Engine Status
             </span>
             <span className="text-sm font-mono font-semibold text-emerald-400 mt-2 block truncate">
-              {health?.database?.pgvector_enabled ? "PostgreSQL + pgvector" : "Local Vector Store"}
+              {health?.database?.pgvector_enabled ? "PostgreSQL + pgvector" : health ? "Local Vector Store" : "Unavailable"}
             </span>
           </div>
         </div>
@@ -177,9 +184,10 @@ export default function SettingsPage() {
             Last Indexed:
           </span>
           <span className="text-zinc-100 font-medium">
-            {stats?.last_indexed_at ? new Date(stats.last_indexed_at).toLocaleString() : "Never"}
+            {stats?.last_indexed_at ? new Date(stats.last_indexed_at).toLocaleString() : statsError ? "Unavailable" : "Never"}
           </span>
         </div>
+        {statsError && <p role="status" className="text-xs text-amber-300 font-mono">{statsError}</p>}
       </div>
 
       {/* Section 3: Privacy & Security */}

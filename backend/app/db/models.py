@@ -20,13 +20,14 @@ class Document(Base):
     file_type = Column(String(64), nullable=False, index=True) # pdf, docx, pptx, txt, png, etc.
     file_size = Column(BigInteger, default=0)
     file_hash = Column(String(64), default="", index=True) # SHA-256 hash for unchanged-document caching
-    processing_signature = Column(String(512), default="") # content processing + embedding configuration version
+    processing_signature = Column(String(512), default="") # Extraction/indexing configuration, not vector provenance
     created_at = Column(DateTime, default=datetime.utcnow)
     modified_at = Column(DateTime, default=datetime.utcnow)
     source = Column(String(128), default="local") # local, upload, etc.
     extracted_text = Column(Text, default="")
     summary = Column(Text, default="")
     embedding_json = Column(Text, default="[]") # JSON list of floats for universal compatibility
+    embedding_provenance = Column(Text, default="") # Actual provider/model/config for this vector
     indexed_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -36,11 +37,21 @@ class Document(Base):
     def get_embedding(self) -> List[float]:
         try:
             return json.loads(self.embedding_json) if self.embedding_json else []
-        except Exception:
+        except (TypeError, ValueError):
             return []
 
     def set_embedding(self, vec: List[float]):
         self.embedding_json = json.dumps(vec)
+
+    def get_embedding_provenance(self) -> Optional[dict]:
+        try:
+            value = json.loads(self.embedding_provenance) if self.embedding_provenance else None
+            return value if isinstance(value, dict) else None
+        except (TypeError, ValueError):
+            return None
+
+    def set_embedding_provenance(self, provenance: Optional[dict]):
+        self.embedding_provenance = json.dumps(provenance, sort_keys=True) if provenance else ""
 
 class Chunk(Base):
     __tablename__ = "chunks"
@@ -52,17 +63,28 @@ class Chunk(Base):
     page_number = Column(Integer, nullable=True) # For PDF
     slide_number = Column(Integer, nullable=True) # For PPTX
     embedding_json = Column(Text, default="[]")
+    embedding_provenance = Column(Text, default="") # Actual provider/model/config for this vector
 
     document = relationship("Document", back_populates="chunks")
 
     def get_embedding(self) -> List[float]:
         try:
             return json.loads(self.embedding_json) if self.embedding_json else []
-        except Exception:
+        except (TypeError, ValueError):
             return []
 
     def set_embedding(self, vec: List[float]):
         self.embedding_json = json.dumps(vec)
+
+    def get_embedding_provenance(self) -> Optional[dict]:
+        try:
+            value = json.loads(self.embedding_provenance) if self.embedding_provenance else None
+            return value if isinstance(value, dict) else None
+        except (TypeError, ValueError):
+            return None
+
+    def set_embedding_provenance(self, provenance: Optional[dict]):
+        self.embedding_provenance = json.dumps(provenance, sort_keys=True) if provenance else ""
 
 class Entity(Base):
     __tablename__ = "entities"

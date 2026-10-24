@@ -10,7 +10,7 @@ Instead of requiring exact filenames or folders, ReFind understands natural quer
 > *“Find the file containing the word sustainability.”*  
 > *“Find that document where I wrote about databases.”*
 
-It retrieves matching files through a **5-signal hybrid retrieval pipeline** (vector search, keyword search, filename relevance, metadata matching, and Jina reranking) and explains why each document matched using grounded **Gemini 2.5 Flash Lite** reasoning.
+The default pipeline uses **local EmbeddingGemma 2** for text, query and image embeddings, local OCR, exact vector retrieval, keyword/metadata signals, and optional Jina reranking. Gemini explanations are generated when you open a result’s context. See [performance behavior and measurements](backend/docs/performance.md).
 
 ---
 
@@ -57,7 +57,7 @@ Open your first terminal:
 ```bash
 cd backend
 pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 *The backend starts at `http://127.0.0.1:8000` with interactive API docs at `http://127.0.0.1:8000/docs`.*
 
@@ -79,36 +79,21 @@ http://localhost:3000
 
 ---
 
-## 🏗️ AI-Powered Hybrid Search Pipeline
+## 🏗️ Default Search Pipeline
 
 ```text
-                     User Query
-                         │
-                         ▼
-              Gemini Query Understanding
-                 (gemini-2.5-flash-lite)
-                         │
-                ┌────────┴────────┐
-                ▼                 ▼
-         Vector Search       Keyword Search
-      (Gemini Embedding 2)  (PostgreSQL / FTS)
-                │                 │
-                └────────┬────────┘
-                         ▼
-                  Merge Candidates
-                 (Deduplicated Pool)
-                         │
-                         ▼
-                    Jina Reranker
-           (jina-reranker-v2-multilingual)
-                         │
-                         ▼
-               Grounded Explanation
-                 (gemini-2.5-flash-lite)
-                         │
-                         ▼
-                 Top Ranked Results
+Query → local clue parsing → EmbeddingGemma 2 query vector
+      → exact cached matrix retrieval + keyword/filename/metadata matching
+      → Jina reranking (when configured) → ranked results and evidence
+
+Open context → relevant passages → optional grounded Gemini explanation
 ```
+
+`LOCAL_FAST_MODE=true` takes precedence over the legacy `EMBEDDING_PROVIDER`
+setting. Text and image embeddings stay local. One process keeps one model on
+the GPU. The backend warms it at startup and lets searches run between indexing
+batches. On Windows, `backend/start-local.ps1` starts the configured environment.
+
 
 ### 5-Signal Scoring Formula
 $$\text{Score} = w_{\text{sem}} \cdot S_{\text{semantic}} + w_{\text{rerank}} \cdot S_{\text{reranker}} + w_{\text{kw}} \cdot S_{\text{keyword}} + w_{\text{meta}} \cdot S_{\text{metadata}} + w_{\text{fn}} \cdot S_{\text{filename}}$$
@@ -124,8 +109,8 @@ Configured in `backend/app/core/config.py`:
 
 ## 🛡️ Privacy & Local-First Ingestion
 - **Local Text Extraction**: PDFs processed locally using **PyMuPDF**, Word documents via **python-docx**, presentations via **python-pptx**, and text files natively.
-- **Local OCR**: Scanned PDFs and images (PNG, JPG, JPEG) are OCR-processed locally via **PaddleOCR** / **pytesseract**.
-- **No Document Uploads**: Entire documents are **never** uploaded to external AI services for indexing.
+- **Local OCR**: Scanned PDFs and images (PNG, JPG, JPEG) are OCR-processed locally via **RapidOCR** with **Tesseract** fallback in local-fast mode.
+- **Local indexing**: Local-fast mode does not send documents or images to external AI services. The explicitly selected legacy mode can use remote image analysis and embeddings.
 - **Minimal API Payloads**: Only compact search queries, document chunks, and retrieved context snippets are passed to Gemini / Jina.
 - **Change Tracking & Caching**: SHA-256 file hashing prevents regenerating embeddings for unchanged documents.
 - **Zero-Downtime Fallback**: If Gemini or Jina is temporarily unavailable or rate-limited, ReFind gracefully degrades to local regex query understanding and hybrid retrieval without throwing runtime errors.
@@ -139,7 +124,7 @@ ReFind supports two database setups seamlessly:
 1. **Zero-Configuration Mode (Default)**:
    - Uses local SQLite with 768-dimensional dense vector similarity. Runs out of the box with zero external database configuration.
 
-2. **Production PostgreSQL + pgvector**:
+2. **Optional PostgreSQL storage**:
    - Start the container using Docker:
      ```bash
      docker compose up -d
@@ -148,20 +133,7 @@ ReFind supports two database setups seamlessly:
      ```env
      DATABASE_URL=postgresql://refind_user:refind_password@localhost:5432/refind_db
      ```
-   - ReFind will automatically enable the `vector` extension and utilize native pgvector indexing.
-
----
-
-## 🔍 Hybrid Retrieval Formula
-
-Results are evaluated across four weighted dimensions:
-
-$$\text{Score} = w_{\text{sem}} \cdot S_{\text{semantic}} + w_{\text{kw}} \cdot S_{\text{keyword}} + w_{\text{meta}} \cdot S_{\text{metadata}} + w_{\text{ent}} \cdot S_{\text{entity}}$$
-
-- **Semantic Similarity ($w = 0.35$):** Cosine similarity between query embedding and document/chunk vectors.
-- **Keyword Relevance ($w = 0.25$):** Token and term frequency matching across content and filenames.
-- **Metadata Relevance ($w = 0.20$):** Format matching (.pdf, .docx, .png) and temporal proximity (month/year).
-- **Entity Relevance ($w = 0.20$):** Overlap with extracted people (`Rahul`), technologies (`PostgreSQL`, `BLE`), and topics (`Architecture`).
+   - ReFind enables the `vector` extension, but the current schema stores vectors as JSON and uses exact application-side scoring. Switching the URL alone does not create a native vector index. The revision-cached search snapshot currently targets SQLite.
 
 ---
 
@@ -175,8 +147,9 @@ python -m pytest tests/test_ai_pipeline.py -v
 python -m pytest tests/test_image_pipeline.py -v
 ```
 
-### Image Search Benchmark (Phase 3)
+### Performance and local model checks
 
-Image indexing keeps Gemini vision analysis enabled by default; set `IMAGE_VISION_ENABLED=false` to disable descriptions while retaining local OCR. Image processing reuses decoded pixels, hashes, OCR results, and identical embedding requests where safe. It logs stage timings, throughput, memory, and failures without changing the indexing API response.
-
-To compare the current description-and-text-embedding path with direct local EmbeddingGemma 2 image embeddings, follow [the Phase 3 benchmark procedure](backend/docs/phase3_image_benchmark.md). The optional dependencies are listed in `backend/requirements-image-benchmark.txt`. Direct model measurements are pending until run in an environment with the model dependencies and weights available.
+See [current performance measurements and reproduction commands](backend/docs/performance.md)
+and [local indexing documentation](backend/docs/local_fast_indexing.md). The older
+[Phase 3 image benchmark](backend/docs/phase3_image_benchmark.md) documents the
+historical remote-vision comparison, not the current default pipeline.

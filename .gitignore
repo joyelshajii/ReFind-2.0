@@ -90,3 +90,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+
+
+# ==========================================
+# Presentations & Pitch Drafts
+# ==========================================
+*.ppt
+*.pptx
+**/*.ppt
+**/*.pptx
+.codex-build*
+**/pitch*

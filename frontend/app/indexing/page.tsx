@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, ChangeEvent, DragEvent, useTransition } from "react";
+import { useEffect, useState, useRef, useCallback, ChangeEvent, DragEvent, useTransition } from "react";
 import {
   FolderGit2,
   UploadCloud,
@@ -32,13 +32,14 @@ import {
   getIndexedDocuments,
   deleteDocument,
   deleteAllDocuments,
-  getDocumentDownloadUrl
+  getDocumentDownloadUrl,
+  getErrorMessage,
 } from "@/lib/api";
 import { IndexProgressStatus, IndexedDocumentItem } from "@/types";
 
 const SUPPORTED_FORMATS = ["PDF", "DOCX", "PPTX", "TXT", "PNG", "JPG", "JPEG", "WEBP", "GIF", "BMP", "TIFF", "HEIC", "HEIF"];
 
-export default function IndexPage() {
+export default function IndexingPage() {
   const [status, setStatus] = useState<IndexProgressStatus>({
     is_indexing: false,
     current_stage: "idle",
@@ -63,60 +64,82 @@ export default function IndexPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isClearingIndex, setIsClearingIndex] = useState(false);
   const [backendConnected, setBackendConnected] = useState(true);
+  const documentRequest = useRef(0);
 
   // Fetch indexed documents list
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
+    const request = ++documentRequest.current;
     setIsLoadingDocs(true);
     try {
       const docs = await getIndexedDocuments(docSearchQuery, selectedFormat);
+      if (request !== documentRequest.current) return;
       setDocuments(docs);
       setBackendConnected(true);
     } catch (err) {
-      setBackendConnected(false);
+      if (request === documentRequest.current) setBackendConnected(false);
     } finally {
-      setIsLoadingDocs(false);
+      if (request === documentRequest.current) setIsLoadingDocs(false);
+    }
+  }, [docSearchQuery, selectedFormat]);
+
+  const refreshStatus = async () => {
+    try {
+      const updated = await getIndexStatus();
+      setStatus(updated);
+      setBackendConnected(true);
+    } catch {
+      setBackendConnected(false);
     }
   };
 
-  // Poll status while indexing is in progress
+  // Poll lightweight progress; refresh file data only when the index changes.
   useEffect(() => {
-    const fetchStatus = () => {
-      getIndexStatus()
-        .then((data) => {
-          setStatus(data);
-          setBackendConnected(true);
-          // If indexing has transitioned or completed, refresh documents list too
-          if (!data.is_indexing && data.total_files > 0) {
-            loadDocuments();
-          }
-        })
-        .catch(() => {
-          setBackendConnected(false);
-        });
+    let active = true;
+    let inFlight = false;
+    let previous: IndexProgressStatus | null = null;
+    const fetchStatus = async () => {
+      if (inFlight || document.hidden) return;
+      inFlight = true;
+      try {
+        const data = await getIndexStatus();
+        if (!active) return;
+        setStatus(data);
+        setBackendConnected(true);
+        if (previous && !data.is_indexing && (
+          previous.is_indexing || previous.total_files !== data.total_files ||
+          previous.last_indexed_at !== data.last_indexed_at
+        )) {
+          void loadDocuments();
+        }
+        previous = data;
+      } catch {
+        if (active) setBackendConnected(false);
+      } finally {
+        inFlight = false;
+      }
     };
-
-    fetchStatus();
-    loadDocuments();
-
+    void fetchStatus();
     const interval = setInterval(fetchStatus, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    document.addEventListener("visibilitychange", fetchStatus);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", fetchStatus);
+    };
+  }, [loadDocuments]);
 
-  // Reload documents when filters change
+  // One initial request, and debounce subsequent filter edits.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadDocuments();
-    }, 250);
+    const timer = setTimeout(() => { void loadDocuments(); }, 250);
     return () => clearTimeout(timer);
-  }, [docSearchQuery, selectedFormat]);
+  }, [loadDocuments]);
 
   const handleIndexFolder = async () => {
     try {
       setFeedbackMessage("Starting directory indexing...");
       const res = await triggerIndexing(folderPathInput.trim() || undefined);
       setFeedbackMessage(res.message);
-      const updated = await getIndexStatus();
-      setStatus(updated);
+      await refreshStatus();
       loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to start indexing");
@@ -128,8 +151,7 @@ export default function IndexPage() {
       setFeedbackMessage("Generating sample files & starting ingestion...");
       const res = await seedDemoData();
       setFeedbackMessage(res.message);
-      const updated = await getIndexStatus();
-      setStatus(updated);
+      await refreshStatus();
       loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to seed demo data");
@@ -147,13 +169,17 @@ export default function IndexPage() {
         formData.append("files", files[i]);
       }
       const res = await uploadFiles(formData);
-      setFeedbackMessage(res.message);
+      const failed = res.failed_files ?? [];
+      const failureSummary = failed.slice(0, 3)
+        .map((item) => `${item.filename}: ${item.error}`)
+        .join(" | ");
+      const remainingFailures = failed.length > 3 ? ` | ${failed.length - 3} more failed` : "";
+      setFeedbackMessage([res.message, failureSummary + remainingFailures].filter(Boolean).join(" "));
       // Refresh status and list
-      const updated = await getIndexStatus();
-      setStatus(updated);
+      await refreshStatus();
       loadDocuments();
-    } catch (err: any) {
-      setFeedbackMessage(err.message || "Failed to upload files");
+    } catch (err: unknown) {
+      setFeedbackMessage(getErrorMessage(err, "Failed to upload files"));
     } finally {
       setIsUploading(false);
     }
@@ -165,8 +191,7 @@ export default function IndexPage() {
     try {
       await deleteDocument(id);
       setFeedbackMessage(`Removed "${name}" from index.`);
-      const updated = await getIndexStatus();
-      setStatus(updated);
+      await refreshStatus();
       loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to delete document");
@@ -190,8 +215,7 @@ export default function IndexPage() {
       const res = await deleteAllDocuments();
       setDocuments([]);
       setFeedbackMessage(res.message);
-      const updated = await getIndexStatus();
-      setStatus(updated);
+      await refreshStatus();
       await loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to clear indexed files");

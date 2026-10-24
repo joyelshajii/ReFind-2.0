@@ -51,7 +51,10 @@ def process_pptx(file_path: str) -> Dict[str, Any]:
                     "slide_number": slide_num
                 })
     except Exception as e:
-        logger.error(f"Error processing PPTX {file_path}: {e}")
+        logger.exception("Unable to process PPTX %s", path.name)
+        raise RuntimeError(
+            f"Unable to read presentation '{path.name}'. The file may be damaged or password-protected."
+        ) from e
 
     extracted_text = "\n\n".join(full_text_parts)
     return {

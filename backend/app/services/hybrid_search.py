@@ -1,5 +1,6 @@
 import re
 import logging
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
@@ -7,12 +8,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from app.db.models import Document, Chunk, Entity
 from app.schemas.search import QueryClues, SearchResultItem, EvidenceItem
-from app.services.embedding_service import get_embedding, cosine_similarity
+from app.services.embedding_service import (
+    get_embedding_with_provenance, cosine_similarity, embedding_signature_is_compatible,
+)
+from app.services.search_index import get_search_index
 from app.services.reranker_service import reranker_service
 from app.services.gemini_service import gemini_service
 from app.core.config import settings
 
 logger = logging.getLogger("refind.services.hybrid_search")
+
+IMAGE_TYPES = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"}
 
 def _extract_snippet(text: str, keywords: List[str], max_len: int = 220) -> str:
     """
@@ -65,68 +71,70 @@ def search_documents(
     Full AI-Powered Hybrid Search Pipeline:
     1. Query Understanding (provided via clues)
     2. Candidate Retrieval:
-       - Semantic Vector Search (top candidates via pgvector/embeddings)
-       - Keyword / Full-Text Search (top candidates via text search & ilike)
+       - Exact cached matrix search over compatible EmbeddingGemma vectors
+       - Keyword search over indexed text
        - Filename & Metadata matching
     3. Merge candidates and deduplicate (up to RETRIEVAL_CANDIDATE_LIMIT)
     4. Compute initial 5-signal scores (semantic, keyword, filename, metadata)
     5. Jina Reranker across candidates (falls back gracefully to hybrid scores if unavailable)
-    6. Grounded Gemini match explanations for top results
+    6. Optional inline explanations (normally generated in the context view)
     7. Return top ranked results
     """
-    raw_docs = db.query(Document).all()
-    if not raw_docs:
+    started = time.perf_counter()
+    if db.query(Document.id).first() is None:
         return []
-
-    # Guard: do not search files that no longer exist on disk
+    query_vec, query_provenance = get_embedding_with_provenance(query, task="retrieval.query")
+    embedded_at = time.perf_counter()
+    index = get_search_index(db, query_provenance)
+    semantic_matches = index.score(query_vec)
     documents = []
     seen_paths = set()
-    for doc in raw_docs:
+    for doc in index.documents:
         if not Path(doc.filepath).exists():
             continue
         canon = str(Path(doc.filepath).resolve()).lower()
-        if canon in seen_paths:
-            continue
-        seen_paths.add(canon)
-        documents.append(doc)
-
+        if canon not in seen_paths:
+            seen_paths.add(canon)
+            documents.append(doc)
+    retrieved_at = time.perf_counter()
     if not documents:
         return []
-
-    # 1. Generate query embedding for vector retrieval
-    query_vec = get_embedding(query, task="retrieval.query")
 
     # Candidate Retrieval Pool (Deduplicated by document id)
     candidate_map: Dict[str, Document] = {}
 
     # Keyword tokens
     search_keywords = list(dict.fromkeys(clues.keywords + (clues.topics or [])))
+    keyword_patterns = []
+    for keyword in search_keywords:
+        stem = keyword.lower()
+        if len(stem) > 3 and stem.endswith("s") and not stem.endswith("ss"):
+            stem = stem[:-1]
+        keyword_patterns.append(re.compile(r"(?<!\w)" + re.escape(stem) + r"s?(?!\w)"))
 
     # Semantic candidate retrieval
-    scored_by_vec: List[Tuple[float, Document]] = []
-    for doc in documents:
-        doc_vec = doc.get_embedding()
-        best_sem = cosine_similarity(query_vec, doc_vec) if doc_vec else 0.0
-        for chunk in doc.chunks:
-            c_vec = chunk.get_embedding()
-            if c_vec:
-                c_sem = cosine_similarity(query_vec, c_vec)
-                if c_sem > best_sem:
-                    best_sem = c_sem
-        scored_by_vec.append((best_sem, doc))
-
-    scored_by_vec.sort(key=lambda x: x[0], reverse=True)
-    # Take top 20 semantic candidates
-    for score, doc in scored_by_vec[:20]:
+    scored_by_vec = sorted(
+        ((semantic_matches[doc.id][0], doc) for doc in documents),
+        key=lambda pair: pair[0], reverse=True,
+    )
+    semantic_limit = max(top_k, settings.RETRIEVAL_CANDIDATE_LIMIT)
+    for score, doc in scored_by_vec[:semantic_limit]:
         candidate_map[doc.id] = doc
 
     # Keyword / Filename candidate retrieval
     for doc in documents:
-        doc_lower = (doc.extracted_text or "").lower()
+        doc_lower = doc.lower_text
         fn_lower = doc.filename.lower()
         if any(kw.lower() in fn_lower or kw.lower() in doc_lower for kw in search_keywords):
             candidate_map[doc.id] = doc
-        if clues.file_type and doc.file_type.lower() == clues.file_type.lower():
+        if clues.file_type and (
+            clues.file_type.lower() in {
+                doc.file_type.lower(), Path(doc.filepath).suffix.lstrip(".").lower()
+            }
+            or (clues.file_type.lower() == "image" and doc.file_type.lower() in {
+                "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"
+            })
+        ):
             candidate_map[doc.id] = doc
 
     # If candidates are few, include all available documents up to candidate limit
@@ -155,38 +163,27 @@ def search_documents(
     }
 
     scored_candidates: List[Dict[str, Any]] = []
+    literal_query = bool(re.search(r'\b(?:contain(?:s|ing)?|exact(?:ly)?|word|name|named)\b|["“”]', query, re.I))
+    quoted_terms = re.findall(r'["“]([^"”]+)["”]', query)
+    neural_query = query_provenance.get("provider") in {"embeddinggemma", "gemini", "jina"}
+
 
     for doc in candidate_docs:
         doc_text = doc.extracted_text or ""
-        doc_lower = doc_text.lower()
+        doc_lower = doc.lower_text
         filename_lower = doc.filename.lower()
 
-        # 1. Semantic Similarity (document + best chunk)
-        doc_vec = doc.get_embedding()
-        best_sem = cosine_similarity(query_vec, doc_vec) if doc_vec else 0.0
-        best_chunk_loc = None
-        best_chunk_text = ""
-
-        for chunk in doc.chunks:
-            chunk_vec = chunk.get_embedding()
-            if chunk_vec:
-                chunk_sem = cosine_similarity(query_vec, chunk_vec)
-                if chunk_sem > best_sem:
-                    best_sem = chunk_sem
-                    best_chunk_text = chunk.content
-                    if chunk.page_number:
-                        best_chunk_loc = f"Page {chunk.page_number}"
-                    elif chunk.slide_number:
-                        best_chunk_loc = f"Slide {chunk.slide_number}"
+        # Reuse the exact vectorized retrieval score and winning passage.
+        best_sem, best_chunk_loc, best_chunk_text = semantic_matches[doc.id]
 
         # 2. Keyword Relevance (supporting singular/plural and stem matching)
         kw_matches = 0
         total_kws = len(search_keywords)
         if total_kws > 0:
-            for kw in search_keywords:
-                kw_l = kw.lower().rstrip("s") # Stem trailing 's' for simple plural matching
-                pattern = r"\b" + re.escape(kw_l)
-                if re.search(pattern, doc_lower) or re.search(pattern, filename_lower):
+            for pattern in keyword_patterns:
+                # A filename hit contributes through fn_score above; it cannot
+                # satisfy the separate requirement for a content keyword hit.
+                if pattern.search(doc_lower):
                     kw_matches += 1
             kw_score = kw_matches / total_kws
         else:
@@ -206,23 +203,27 @@ def search_documents(
         detected_entities: List[str] = []
         evidence_list: List[EvidenceItem] = []
 
-        image_types = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"}
+        is_image = (
+            doc.file_type.lower() in IMAGE_TYPES
+            or Path(doc.filepath).suffix.lstrip(".").lower() in IMAGE_TYPES
+        )
         if clues.file_type:
             meta_checks += 1
+            source_type = Path(doc.filepath).suffix.lstrip(".").lower()
             type_matches = (
-                doc.file_type.lower() in image_types
+                doc.file_type.lower() in IMAGE_TYPES
                 if clues.file_type.lower() == "image"
-                else doc.file_type.lower() == clues.file_type.lower()
+                else clues.file_type.lower() in {doc.file_type.lower(), source_type}
             )
             if type_matches:
                 meta_score += 1.0
-                clue_label = "IMAGE" if clues.file_type.lower() == "image" else doc.file_type.upper()
+                clue_label = "IMAGE" if clues.file_type.lower() == "image" else clues.file_type.upper()
                 matching_clues.append(clue_label)
                 evidence_list.append(EvidenceItem(
                     clue_name=clue_label,
                     clue_type="file_type",
                     matched_text=f"Document format matches requested '{clue_label}' type.",
-                    location=f"File extension ({doc.file_type})",
+                    location=f"Source file extension ({source_type})",
                     verified=True
                 ))
 
@@ -296,12 +297,52 @@ def search_documents(
                     verified=True
                 ))
 
-        # Do not return unrelated documents for queries that have specific search keywords but zero matches
-        if total_kws > 0 and kw_matches == 0:
+        has_image_content_text = (
+            "visual description:" in doc_lower
+            or "detected text in image:" in doc_lower
+        )
+
+        # A textless image has no OCR terms to match. Admit it only when its
+        # stored vector is a compatible direct image embedding and it has a
+        # positive cross-modal similarity to the query. Text embeddings of
+        # image metadata must not masquerade as visual matches.
+        doc_provenance = doc.get_embedding_provenance() or {}
+        is_direct_visual_embedding = (
+            doc_provenance.get("task") == "retrieval.image"
+            and embedding_signature_is_compatible(doc_provenance, query_provenance)
+        )
+        visual_only_match = (
+            is_image
+            and not has_image_content_text
+            and is_direct_visual_embedding
+            and best_sem >= settings.SEARCH_SEMANTIC_MIN_SCORE
+        )
+        # Explicit text lookups remain literal. Natural-language searches can
+        # retrieve synonyms/paraphrases using the neural embedding signal.
+        semantic_match = (
+            neural_query and not literal_query
+            and best_sem >= settings.SEARCH_SEMANTIC_MIN_SCORE
+            and (len(search_keywords) > 1 or bool(re.search(r"\b(?:about|related|describ)\w*\b", query, re.I)))
+        )
+        if quoted_terms and not all(term.lower() in doc_lower for term in quoted_terms):
             continue
+        if total_kws > 0 and kw_matches == 0 and not (semantic_match or (visual_only_match and not literal_query)):
+            continue
+        if semantic_match and kw_matches == 0 and not visual_only_match:
+            matching_clues.append("Semantic similarity")
+
+        if visual_only_match and kw_matches == 0:
+            matching_clues.append("Visual content")
+            evidence_list.append(EvidenceItem(
+                clue_name="Visual content",
+                clue_type="visual",
+                matched_text="Matched the query using the image's visual embedding.",
+                location="Image content",
+                verified=True,
+            ))
 
         final_meta = (meta_score / meta_checks) if meta_checks > 0 else 0.5
-        snippet = _extract_snippet(doc_text, search_keywords)
+        snippet = _extract_snippet(best_chunk_text or doc_text, search_keywords)
 
         # Baseline hybrid score (weights configurable in settings)
         # initial weights: semantic 0.45, reranker 0.20, keyword 0.15, metadata 0.10, filename 0.10
@@ -317,33 +358,57 @@ def search_documents(
             "matching_clues": list(dict.fromkeys(matching_clues)),
             "detected_entities": list(dict.fromkeys(detected_entities)),
             "evidence": evidence_list,
-            "repr_text": (best_chunk_text or doc_text)[:800] or doc.filename
+            "repr_text": (best_chunk_text or doc_text)[:800] or doc.filename,
+            # A text reranker cannot inspect pixels. Only send an image to it
+            # when OCR or a genuine visual description was extracted.
+            "text_rerankable": (
+                not is_image
+                or has_image_content_text
+            ),
         })
 
+    scored_at = time.perf_counter()
+    # Bound remote work by hybrid relevance, keeping all local candidates in
+    # the final ranking. Ask for every selected score to avoid mixing Jina's
+    # top-N scores with incomparable fallback scores inside the reranked pool.
+    def initial_score(candidate):
+        return ((settings.WEIGHT_SEMANTIC + settings.WEIGHT_RERANKER) * candidate["best_sem"]
+                + settings.WEIGHT_KEYWORD * candidate["kw_score"]
+                + settings.WEIGHT_METADATA * candidate["meta_score"]
+                + settings.WEIGHT_FILENAME * candidate["fn_score"])
+    ranked_indices = sorted(range(len(scored_candidates)),
+                            key=lambda i: initial_score(scored_candidates[i]), reverse=True)
     # 5. Jina Reranking Stage
-    candidate_texts = [c["repr_text"] for c in scored_candidates]
+    rerank_indices = [
+        index for index in ranked_indices
+        if scored_candidates[index]["text_rerankable"]
+    ][:max(top_k, settings.RETRIEVAL_CANDIDATE_LIMIT, settings.RERANKER_TOP_K)]
+    candidate_texts = [scored_candidates[index]["repr_text"] for index in rerank_indices]
     jina_results = None
-    if settings.JINA_API_KEY:
+    if settings.JINA_API_KEY and candidate_texts:
         try:
             jina_results = reranker_service.rerank(
                 query=query,
                 documents=candidate_texts,
-                top_n=min(len(candidate_texts), settings.RERANKER_TOP_K)
+                top_n=len(candidate_texts)
             )
         except Exception as je:
             logger.warning(f"Jina reranker failed: {je}. Falling back to standard hybrid.")
 
+    reranked_at = time.perf_counter()
+
     # Apply reranker score if returned
+    # Semantic scores are the correct reranking signal for textless images.
+    # They remain intact even when the text reranker returns scores for other
+    # candidates.
+    for candidate in scored_candidates:
+        candidate["reranker_score"] = candidate["best_sem"]
     if jina_results:
         for item in jina_results:
             idx = item.get("index")
             rel = item.get("relevance_score", 0.0)
-            if idx is not None and 0 <= idx < len(scored_candidates):
-                scored_candidates[idx]["reranker_score"] = float(rel)
-    else:
-        # Fallback: distribute reranker weight proportionally onto semantic and keyword
-        for c in scored_candidates:
-            c["reranker_score"] = c["best_sem"]
+            if idx is not None and 0 <= idx < len(rerank_indices):
+                scored_candidates[rerank_indices[idx]]["reranker_score"] = float(rel)
 
     # Compute final composite score
     w_sem = settings.WEIGHT_SEMANTIC
@@ -391,13 +456,13 @@ def search_documents(
             evidence=c["evidence"],
             ai_explanation=None # Will enrich top results below
         )
-        final_results.append((clamped_score, item))
+        final_results.append((composite, item))
 
     final_results.sort(key=lambda x: x[0], reverse=True)
     top_items = [r[1] for r in final_results[:top_k]]
 
     # 6. Generate grounded Gemini result explanations for top 3 results
-    if settings.LLM_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
+    if settings.SEARCH_INLINE_EXPLANATIONS and settings.LLM_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
         for item in top_items[:3]:
             try:
                 # Find matching doc chunks
@@ -414,6 +479,12 @@ def search_documents(
             except Exception as ee:
                 logger.debug(f"AI explanation generation skipped: {ee}")
 
+    logger.info(
+        "Search timings: embedding=%.1fms retrieval=%.1fms scoring=%.1fms rerank=%.1fms total=%.1fms documents=%d candidates=%d",
+        (embedded_at-started)*1000, (retrieved_at-embedded_at)*1000,
+        (scored_at-retrieved_at)*1000, (reranked_at-scored_at)*1000,
+        (time.perf_counter()-started)*1000, len(documents), len(scored_candidates),
+    )
     return top_items
 
 # Backward-compatible alias

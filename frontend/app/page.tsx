@@ -4,16 +4,23 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Settings, ShieldCheck, HardDrive, ArrowUpRight } from "lucide-react";
 import SearchBar from "@/components/SearchBar";
-import { getIndexStats } from "@/lib/api";
+import { getErrorMessage, getIndexStats } from "@/lib/api";
 import { IndexStats } from "@/types";
 
 export default function HomePage() {
   const [stats, setStats] = useState<IndexStats | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   useEffect(() => {
     getIndexStats()
-      .then((data) => setStats(data))
-      .catch((err) => console.error("Could not fetch stats:", err));
+      .then((data) => {
+        setStats(data);
+        setStatsError(null);
+      })
+      .catch((err: unknown) => {
+        console.error("Could not fetch stats:", err);
+        setStatsError(getErrorMessage(err, "Index statistics are unavailable."));
+      });
   }, []);
 
   return (
@@ -55,14 +62,14 @@ export default function HomePage() {
           {/* Currently indexed source badge */}
           <div className="flex items-center gap-2.5 flex-wrap justify-center">
             <Link
-              href="/index"
+              href="/indexing"
               className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-black/60 hover:bg-black/90 border border-white/[0.1] hover:border-white/[0.22] backdrop-blur-md text-sm text-zinc-200 transition-all shadow-[0_4px_20px_rgba(0,0,0,0.6)] group"
             >
               <HardDrive className="w-4 h-4 text-indigo-400" />
               <span>
                 <strong className="text-white font-semibold">Local Files</strong> ·{" "}
                 <span className="text-zinc-300">
-                  {stats ? `${stats.total_documents} files indexed` : "Loading index..."}
+                  {stats ? `${stats.total_documents} files indexed` : statsError ? "Index unavailable" : "Loading index..."}
                 </span>
               </span>
               <ArrowUpRight className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" />
@@ -76,6 +83,12 @@ export default function HomePage() {
               <Settings className="w-4 h-4" />
             </Link>
           </div>
+
+          {statsError && (
+            <p role="status" className="text-xs text-amber-300 font-mono text-center">
+              {statsError}
+            </p>
+          )}
 
           {/* Privacy badge */}
           <div className="flex items-center gap-2 text-xs sm:text-sm text-zinc-400 font-mono">

@@ -1,5 +1,6 @@
 import logging
 import json
+import sqlite3
 from typing import Generator
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -48,7 +49,7 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
             cursor.execute("PRAGMA busy_timeout=60000;")
             cursor.execute("PRAGMA synchronous=NORMAL;")
             cursor.close()
-        except Exception as pe:
+        except sqlite3.Error as pe:
             logger.debug(f"SQLite PRAGMA error: {pe}")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -57,6 +58,12 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            logger.exception("Unable to roll back database session after request failure")
+        raise
     finally:
         db.close()
 
@@ -75,10 +82,24 @@ def init_db():
         if "processing_signature" not in document_columns:
             conn.execute(text("ALTER TABLE documents ADD COLUMN processing_signature VARCHAR(512) DEFAULT '';"))
             conn.commit()
+        if "embedding_provenance" not in document_columns:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN embedding_provenance TEXT DEFAULT '';"))
+            conn.commit()
 
         chunk_columns = {column["name"] for column in inspect(conn).get_columns("chunks")}
         if "chunk_index" not in chunk_columns:
             conn.execute(text("ALTER TABLE chunks ADD COLUMN chunk_index INTEGER DEFAULT 0;"))
             conn.commit()
+        if "embedding_provenance" not in chunk_columns:
+            conn.execute(text("ALTER TABLE chunks ADD COLUMN embedding_provenance TEXT DEFAULT '';"))
+            conn.commit()
+
+        from app.services.search_index import install_search_revision
+        install_search_revision(conn)
+        # Windows canonical-path lookups use lower(filepath).
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_filepath_lower ON documents (lower(filepath))"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_indexed_at ON documents (indexed_at)"))
+        conn.commit()
+        engine._refind_search_revision = conn.dialect.name == "sqlite"
 
     logger.info("Database tables and migration verified/created.")

@@ -5,15 +5,20 @@ from collections import OrderedDict
 from typing import List, Union
 from pathlib import Path
 from PIL import Image
+from app.core.config import settings
 
 logger = logging.getLogger("refind.services.ocr")
 
 _OCR_CACHE_LIMIT = 128
+_OCR_PROFILE = "paddle-angle-en+tesseract-fallback-v1"
+_LOCAL_FAST_OCR_PROFILE = "rapidocr-onnxruntime-bundled+tesseract-fallback-v1"
 
 class OCRService:
     def __init__(self):
         self._paddleocr = None
         self._paddleocr_failed = False
+        self._rapidocr = None
+        self._rapidocr_failed = False
         self._result_cache = OrderedDict()
         self._cache_lock = threading.RLock()
         self._key_locks = {}
@@ -33,6 +38,19 @@ class OCRService:
                         self._paddleocr_failed = True
         return self._paddleocr
 
+    def _get_rapidocr(self):
+        if self._rapidocr is None and not self._rapidocr_failed:
+            with self._model_lock:
+                if self._rapidocr is None and not self._rapidocr_failed:
+                    try:
+                        from rapidocr_onnxruntime import RapidOCR
+                        self._rapidocr = RapidOCR()
+                        logger.info("Bundled local RapidOCR initialized successfully.")
+                    except Exception as error:
+                        self._rapidocr_failed = True
+                        logger.warning("Local RapidOCR initialization failed: %s", error)
+        return self._rapidocr
+
     def extract_text_from_image(self, image_path: Union[str, Image.Image]) -> List[str]:
         """
         Extracts text locally from an image file (PNG, JPG, JPEG, screenshots).
@@ -48,12 +66,13 @@ class OCRService:
             if isinstance(image_path, Image.Image):
                 # The image processor passes its already-open image so OCR does
                 # not decode the same file a second time.
-                image = image_path.convert("RGB")
+                image = image_path if image_path.mode == "RGB" else image_path.convert("RGB")
             else:
                 image = Image.open(str(path)).convert("RGB")
             image_bytes = image.tobytes()
+            profile = _LOCAL_FAST_OCR_PROFILE if settings.LOCAL_FAST_MODE else _OCR_PROFILE
             cache_key = hashlib.sha256(
-                f"{image.width}x{image.height}:RGB:".encode("ascii") + image_bytes
+                f"{profile}:{image.width}x{image.height}:RGB:".encode("ascii") + image_bytes
             ).hexdigest()
         except Exception as error:
             logger.debug("Unable to prepare image for OCR: %s", error)
@@ -75,9 +94,27 @@ class OCRService:
                     self._result_cache.move_to_end(cache_key)
                     return list(cached)
 
-            # 1. Try PaddleOCR on the decoded pixels.
-            ocr = self._get_paddleocr()
-            if ocr is not None:
+            # Local-fast mode uses the ONNX weights bundled with the installed
+            # RapidOCR package. PaddleOCR may download weights on first use, so
+            # it is intentionally excluded from offline indexing.
+            if settings.LOCAL_FAST_MODE:
+                ocr = self._get_rapidocr()
+                if ocr is not None:
+                    try:
+                        import numpy as np
+                        image_bgr = np.asarray(image)[:, :, ::-1]
+                        result, _ = ocr(image_bgr)
+                        for item in result or []:
+                            if len(item) > 1 and str(item[1]).strip():
+                                text = str(item[1]).strip()
+                                if text not in lines:
+                                    lines.append(text)
+                    except Exception as error:
+                        logger.warning("Bundled RapidOCR failed on %s: %s", path.name if path else "image", error)
+            # 1. Legacy mode tries PaddleOCR on the decoded pixels.
+            else:
+                ocr = self._get_paddleocr()
+            if not settings.LOCAL_FAST_MODE and ocr is not None:
                 try:
                     import numpy as np
                     # Match PaddleOCR's previous path-based OpenCV decode
@@ -95,7 +132,8 @@ class OCRService:
                 except Exception as pe:
                     logger.warning("PaddleOCR extraction failed on %s: %s", path.name if path else "image", pe)
 
-            # 2. Fallback to pytesseract if PaddleOCR returned no text.
+            # Local Tesseract is a fallback only when the executable is
+            # installed. It is never downloaded or configured automatically.
             if not lines:
                 try:
                     import pytesseract
@@ -121,30 +159,16 @@ class OCRService:
         Extracts OCR text from a rendered PyMuPDF Pixmap.
         """
         try:
-            import numpy as np
-            import io
-            img_bytes = page_pixmap.tobytes("png")
-            img = Image.open(io.BytesIO(img_bytes))
-            
-            ocr = self._get_paddleocr()
-            if ocr is not None:
-                img_np = np.array(img)
-                result = ocr.ocr(img_np, cls=True)
-                extracted = []
-                if result:
-                    for line_group in result:
-                        if line_group:
-                            for line_info in line_group:
-                                if len(line_info) > 1 and len(line_info[1]) > 0:
-                                    t = line_info[1][0].strip()
-                                    if t:
-                                        extracted.append(t)
-                if extracted:
-                    return "\n".join(extracted)
-
-            # Fallback
-            import pytesseract
-            return pytesseract.image_to_string(img).strip()
+            # PyMuPDF already provides lossless raster pixels. Avoid PNG
+            # compression followed immediately by PNG decoding for every page.
+            if hasattr(page_pixmap, "samples"):
+                mode = "RGBA" if page_pixmap.alpha else ("L" if page_pixmap.n == 1 else "RGB")
+                img = Image.frombytes(mode, (page_pixmap.width, page_pixmap.height), page_pixmap.samples)
+            else:
+                # Compatibility with pixmap adapters exposing only encoded bytes.
+                import io
+                img = Image.open(io.BytesIO(page_pixmap.tobytes("png")))
+            return "\n".join(self.extract_text_from_image(img))
         except Exception as e:
             logger.debug(f"Pixmap OCR failed: {e}")
             return ""

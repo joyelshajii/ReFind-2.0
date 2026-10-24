@@ -181,12 +181,16 @@ def _load_manifest(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, str
 
 
 def _memory_mb(peak: bool = False) -> float | None:
-    if not peak:
-        try:
-            import psutil
-            return round(psutil.Process().memory_info().rss / (1024 * 1024), 2)
-        except Exception:
-            pass
+    try:
+        import psutil
+        memory = psutil.Process().memory_info()
+        if not peak:
+            return round(memory.rss / (1024 * 1024), 2)
+        peak_working_set = getattr(memory, "peak_wset", None)
+        if peak_working_set is not None:
+            return round(peak_working_set / (1024 * 1024), 2)
+    except Exception:
+        pass
     try:
         if sys.platform == "win32":
             import ctypes
@@ -328,7 +332,16 @@ def run_benchmark(allow_download: bool, manifest_path: Path | None = None) -> di
             "images_indexed": len(legacy_vectors), "failures": legacy_failures,
             "index_seconds_total": round(legacy_elapsed, 3),
             "index_seconds_per_image": round(legacy_elapsed / max(len(legacy_vectors), 1), 3),
-            "stage_seconds": {key: round(value, 3) for key, value in legacy_stages.items()},
+            "stage_seconds": {
+                "image_processing": round(legacy_stages["image_processing_seconds"], 3),
+                "text_embedding": round(legacy_stages["embedding_seconds"], 3),
+            },
+            "image_substage_seconds": {
+                "vision_preprocessing": round(legacy_stages["vision_preprocess_seconds"], 3),
+                "vision_inference_or_cache": round(legacy_stages["vision_seconds"], 3),
+                "ocr_or_cache": round(legacy_stages["ocr_seconds"], 3),
+            },
+            "timing_notes": ["Image component timings are included in image_processing and overlap; do not sum them."],
             "memory_start_mb": memory_before, "memory_end_mb": _memory_mb(),
             "process_peak_memory_mb": _memory_mb(peak=True),
             **legacy_metrics,
@@ -337,6 +350,7 @@ def run_benchmark(allow_download: bool, manifest_path: Path | None = None) -> di
         # Direct image -> local EmbeddingGemma 2, with matching text query vectors.
         direct_started = time.perf_counter()
         direct_vectors = {}
+        direct_image_attempts = 0
         model_load_seconds = None
         memory_after_model_load = None
         direct_failure = None
@@ -357,6 +371,7 @@ def run_benchmark(allow_download: bool, manifest_path: Path | None = None) -> di
             model_load_seconds = time.perf_counter() - model_load_started
             memory_after_model_load = _memory_mb()
             for name, image in images.items():
+                direct_image_attempts += 1
                 stage_started = time.perf_counter()
                 direct_vectors[name] = model.encode(
                     {"image": image}, convert_to_numpy=True,
@@ -385,7 +400,8 @@ def run_benchmark(allow_download: bool, manifest_path: Path | None = None) -> di
             "model_load_memory_delta_mb": round(memory_after_model_load - direct_memory_before, 2)
             if memory_after_model_load is not None and direct_memory_before is not None else None,
             "images_indexed": len(direct_vectors),
-            "failures": (len(images) - len(direct_vectors)) if direct_failure else 0,
+            "failures": max(0, direct_image_attempts - len(direct_vectors)),
+            "images_not_attempted": len(images) - direct_image_attempts,
             "index_seconds_total_including_load": round(direct_index_elapsed, 3),
             "index_seconds_per_image_excluding_load": round(
                 direct_stages["image_embedding_seconds"] / max(len(direct_vectors), 1), 3
@@ -408,6 +424,12 @@ def run_benchmark(allow_download: bool, manifest_path: Path | None = None) -> di
                                 if item["ocr_exact"].casefold() in text.casefold()]}
             for item in queries if item.get("ocr_exact")
         ]
+        result["status"] = (
+            "measured"
+            if result["methods"]["gemini_description_plus_text_embedding"]["status"] == "measured"
+            and result["methods"]["embeddinggemma_2_direct_image"]["status"] == "measured"
+            else "partial"
+        )
         return result
 
 
@@ -427,7 +449,7 @@ def main() -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(serialized + "\n", encoding="utf-8")
-    return 0 if result.get("status") == "measured" else 2
+    return 0 if result.get("status") in {"measured", "partial"} else 2
 
 
 if __name__ == "__main__":

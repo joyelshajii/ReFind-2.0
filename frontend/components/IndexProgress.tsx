@@ -144,7 +144,7 @@ export default function IndexProgress({ status }: IndexProgressProps) {
       </div>
 
       {status.error_message && (
-        <div className="p-3.5 rounded-xl bg-red-950/30 border border-red-800/40 text-sm text-red-200">
+        <div className="p-3.5 rounded-xl bg-red-950/30 border border-red-800/40 text-sm text-red-200 whitespace-pre-line">
           {status.error_message}
         </div>
       )}

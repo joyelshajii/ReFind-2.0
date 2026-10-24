@@ -1,9 +1,11 @@
 import os
 import json
+import hashlib
 import logging
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 from app.core.config import settings
+from app.services.request_cache import RequestCache
 
 logger = logging.getLogger("refind.services.gemini")
 
@@ -19,12 +21,13 @@ class StructuredIntent(BaseModel):
 class GeminiService:
     def __init__(self):
         self._client = None
+        self._explanations = RequestCache()
 
     def _get_client(self):
         if self._client is None and settings.GEMINI_API_KEY:
             try:
                 from google import genai
-                self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                self._client = genai.Client(api_key=settings.GEMINI_API_KEY, http_options={"timeout": 8000, "retry_options": {"attempts": 1}})
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini client: {e}")
                 self._client = None
@@ -118,25 +121,17 @@ Retrieved Excerpts:
 
 Provide only the 1-2 sentence explanation.
 """
-        working_model = getattr(self, "_working_chat_model", None)
-        models_to_try = [working_model] if working_model else []
-        for m in [settings.GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.8-flash"]:
-            if m and m not in models_to_try:
-                models_to_try.append(m)
+        key = hashlib.sha256((settings.GEMINI_API_KEY + settings.GEMINI_MODEL + prompt).encode()).hexdigest()
+        return self._explanations.get_or_call(key, 300, lambda: self._explain(client, prompt))
 
-        for model_name in models_to_try:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                if response and response.text:
-                    self._working_chat_model = model_name
-                    return response.text.strip()
-            except Exception as e:
-                logger.warning(f"Gemini match explanation failed with model {model_name}: {e}")
-                continue
-
+    def _explain(self, client, prompt):
+        try:
+            response = client.models.generate_content(model=settings.GEMINI_MODEL, contents=prompt)
+            if response and response.text:
+                return response.text.strip()
+        except Exception as error:
+            logger.warning("Gemini context explanation failed: %s", error)
         return None
+
 
 gemini_service = GeminiService()

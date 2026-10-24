@@ -7,7 +7,7 @@ import { Search, Filter, AlertCircle, ArrowLeft } from "lucide-react";
 import SearchBar from "@/components/SearchBar";
 import ResultCard from "@/components/ResultCard";
 import ContextModal from "@/components/ContextModal";
-import { searchDocuments } from "@/lib/api";
+import { getErrorMessage, searchDocuments } from "@/lib/api";
 import { SearchResponse, SearchResultItem } from "@/types";
 
 function SearchResultsContent() {
@@ -21,15 +21,20 @@ function SearchResultsContent() {
   const [selectedResultForContext, setSelectedResultForContext] = useState<SearchResultItem | null>(null);
 
   const performSearch = async (queryText: string) => {
-    if (!queryText.trim()) return;
+    if (!queryText.trim()) {
+      setResponse(null);
+      setError("Enter a search query.");
+      return;
+    }
     setLoading(true);
     setError(null);
+    setResponse(null);
     try {
       const data = await searchDocuments(queryText);
       setResponse(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Search failed:", err);
-      setError(err.message || "Search failed to execute");
+      setError(getErrorMessage(err, "Search failed to execute"));
     } finally {
       setLoading(false);
     }

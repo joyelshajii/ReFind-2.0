@@ -1,9 +1,13 @@
+import logging
 import re
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.db.models import Document, Chunk, Entity
 from app.schemas.search import QueryClues, ContextDetailResponse, EvidenceItem
 from app.services.gemini_service import gemini_service
+from app.services.embedding_service import get_embedding_with_provenance, cosine_similarity, embedding_signature_is_compatible
+
+logger = logging.getLogger("refind.services.context_explainer")
 
 def generate_context_explanation(
     document: Document,
@@ -160,9 +164,23 @@ def generate_context_explanation(
                 verified=True
             ))
 
-    # Gather 2-3 key snippets from chunks
+    # Explain the relevant passages, including matches late in a document.
+    query_vector, query_provenance = [], None
+    try:
+        query_vector, query_provenance = get_embedding_with_provenance(clues.raw_query, task="retrieval.query")
+    except Exception:
+        logger.debug("Context semantic scoring unavailable; using matched terms.", exc_info=True)
+    def relevance(chunk):
+        keyword_hits = sum(1 for keyword in clues.keywords if keyword.lower() in chunk.content.lower())
+        semantic = (
+            cosine_similarity(query_vector, chunk.get_embedding())
+            if query_vector and embedding_signature_is_compatible(chunk.get_embedding_provenance(), query_provenance)
+            else 0.0
+        )
+        return keyword_hits, semantic
+    best_chunks = sorted(document.chunks, key=relevance, reverse=True)[:3]
     chunk_contents = []
-    for chunk in document.chunks[:3]:
+    for chunk in best_chunks:
         cleaned = " ".join(chunk.content.split())
         chunk_contents.append(cleaned)
         prefix = f"[Page {chunk.page_number}] " if chunk.page_number else (f"[Slide {chunk.slide_number}] " if chunk.slide_number else "")
@@ -178,6 +196,7 @@ def generate_context_explanation(
             relevant_chunks=chunk_contents
         )
     except Exception:
+        logger.warning("AI context explanation failed for document %s", document.id, exc_info=True)
         ai_explanation = None
 
     return ContextDetailResponse(

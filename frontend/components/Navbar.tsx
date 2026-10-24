@@ -16,7 +16,7 @@ export default function Navbar() {
 
   const navItems = [
     { label: "Search", href: "/", icon: Search },
-    { label: "Indexing", href: "/index", icon: FolderGit2 },
+    { label: "Indexing", href: "/indexing", icon: FolderGit2 },
     { label: "Settings", href: "/settings", icon: Settings },
   ];
 

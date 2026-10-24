@@ -13,13 +13,22 @@ def process_txt(file_path: str) -> Dict[str, Any]:
     text_content = ""
 
     encodings = ["utf-8", "utf-8-sig", "latin-1", "cp1252"]
+    decode_error = None
     for enc in encodings:
         try:
             with open(path, "r", encoding=enc) as f:
                 text_content = f.read()
             break
-        except Exception:
-            continue
+        except UnicodeDecodeError as error:
+            decode_error = error
+        except OSError as error:
+            logger.exception("Unable to read text file %s", path.name)
+            raise RuntimeError(f"Unable to read text file '{path.name}'.") from error
+    else:
+        logger.warning("Unable to decode text file %s with configured encodings", path.name)
+        raise RuntimeError(
+            f"Unable to decode text file '{path.name}' using supported encodings."
+        ) from decode_error
 
     paragraphs = [p.strip() for p in text_content.split("\n\n") if p.strip()]
     

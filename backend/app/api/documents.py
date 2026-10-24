@@ -2,7 +2,8 @@ from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only, selectinload
+from sqlalchemy import or_, func
 from app.db.base import get_db
 from app.db.models import Document, Chunk, Entity
 from app.schemas.document import DocumentSchema, DocumentDetailSchema
@@ -27,15 +28,37 @@ def list_documents(
     if search:
         query = query.filter(Document.filename.ilike(f"%{search}%"))
     if file_type:
-        query = query.filter(Document.file_type == file_type.lower())
-
+        requested_type = file_type.lower().lstrip(".")
+        query = query.filter(or_(
+            Document.file_type == requested_type,
+            func.lower(Document.filepath).endswith(f".{requested_type}", autoescape=True),
+        ))
     # Do not expose stale index rows for files that were moved or deleted.
     # Search already applies the same guard; the file browser must stay
     # consistent with search and download behavior.
-    docs = [
-        doc for doc in query.order_by(Document.indexed_at.desc()).all()
-        if Path(doc.filepath).exists()
-    ][offset:offset + limit]
+    ids = []
+    visible = 0
+    for row in query.with_entities(Document.id, Document.filepath).order_by(Document.indexed_at.desc()).all():
+        if not Path(row.filepath).exists():
+            continue
+        if visible >= offset:
+            ids.append(row.id)
+        visible += 1
+        if len(ids) >= limit:
+            break
+    if not ids:
+        return []
+    # The browser needs metadata and counts, never full text or vector blobs.
+    rows = db.query(Document).filter(Document.id.in_(ids)).options(
+        load_only(Document.id, Document.filename, Document.filepath, Document.file_type,
+                  Document.file_size, Document.created_at, Document.modified_at,
+                  Document.source, Document.summary, Document.indexed_at),
+        selectinload(Document.entities),
+    ).all()
+    by_id = {row.id: row for row in rows}
+    docs = [by_id[doc_id] for doc_id in ids if doc_id in by_id]
+    chunk_counts = dict(db.query(Chunk.document_id, func.count(Chunk.id))
+                        .filter(Chunk.document_id.in_(ids)).group_by(Chunk.document_id).all())
 
     results = []
     for doc in docs:
@@ -51,7 +74,7 @@ def list_documents(
             "summary": doc.summary or "",
             "indexed_at": doc.indexed_at,
             "entities": doc.entities,
-            "chunk_count": len(doc.chunks)
+            "chunk_count": chunk_counts.get(doc.id, 0)
         }
         results.append(DocumentSchema(**doc_dict))
 

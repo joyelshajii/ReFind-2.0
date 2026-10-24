@@ -49,6 +49,5 @@ def process_file(file_path: str) -> Dict[str, Any]:
     file_type = get_file_type(file_path)
     processor = PROCESSORS.get(file_type)
     if not processor:
-        # Fallback to plain text processor
-        return process_txt(file_path)
+        raise ValueError(f"Unsupported file type: {Path(file_path).suffix or '(no extension)'}")
     return processor(file_path)

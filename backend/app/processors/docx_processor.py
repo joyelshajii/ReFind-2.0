@@ -57,7 +57,10 @@ def process_docx(file_path: str) -> Dict[str, Any]:
             })
 
     except Exception as e:
-        logger.error(f"Error processing DOCX {file_path}: {e}")
+        logger.exception("Unable to process DOCX %s", path.name)
+        raise RuntimeError(
+            f"Unable to read Word document '{path.name}'. The file may be damaged or password-protected."
+        ) from e
 
     extracted_text = "\n\n".join(full_text_parts)
     return {
