@@ -3,19 +3,31 @@
 @theme {
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --color-indigo-50: #fffced;
+  --color-indigo-100: #fff5c8;
+  --color-indigo-200: #ffed9d;
+  --color-indigo-300: #ffe577;
+  --color-indigo-400: #f4d64e;
+  --color-indigo-500: #ddc13f;
+  --color-indigo-600: #b99d2f;
+  --color-indigo-700: #927b28;
+  --color-indigo-800: #6b5b20;
+  --color-indigo-900: #4d4118;
+  --color-indigo-950: #28220f;
 }
 
 :root {
-  --background: #000000;
+  --background: #070709;
   --foreground: #f4f4f6;
-  --card: rgba(8, 10, 16, 0.65);
-  --card-border: rgba(255, 255, 255, 0.08);
-  --accent: #6366f1;
-  --accent-glow: rgba(99, 102, 241, 0.12);
+  --card: rgba(12, 12, 14, 0.88);
+  --card-border: rgba(255, 255, 255, 0.09);
+  --accent: #f4d64e;
+  --accent-glow: rgba(244, 214, 78, 0.14);
 }
 
 body {
-  background-color: #000000;
+  background-color: #070709;
+  background-image: radial-gradient(ellipse at 50% 28%, rgba(244, 214, 78, 0.045), transparent 44rem);
   color: var(--foreground);
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -46,22 +58,22 @@ body {
 
 /* Glassmorphic Space Panels */
 .cosmic-panel {
-  background: rgba(6, 8, 14, 0.65);
+  background: rgba(12, 12, 14, 0.88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.7);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .cosmic-panel:hover {
   border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.85), 0 0 20px -5px rgba(99, 102, 241, 0.08);
+  box-shadow: 0 12px 40px -10px rgba(0, 0, 0, 0.85), 0 0 20px -5px rgba(244, 214, 78, 0.08);
 }
 
 /* Minimal futuristic inputs */
 .cosmic-input {
-  background: rgba(4, 6, 12, 0.75);
+  background: rgba(8, 8, 10, 0.75);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -70,39 +82,221 @@ body {
 }
 
 .cosmic-input:focus-within {
-  border-color: rgba(140, 165, 255, 0.4);
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 0 30px -5px rgba(99, 102, 241, 0.18);
+  border-color: rgba(244, 214, 78, 0.48);
+  box-shadow: 0 0 0 1px rgba(244, 214, 78, 0.3), 0 0 30px -5px rgba(244, 214, 78, 0.18);
 }
 
 /* Minimal futuristic buttons */
 .cosmic-button {
-  background: rgba(14, 17, 27, 0.85);
+  background: rgba(20, 20, 22, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(10px);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .cosmic-button:hover:not(:disabled) {
-  background: rgba(24, 29, 44, 0.95);
+  background: rgba(32, 31, 27, 0.95);
   border-color: rgba(255, 255, 255, 0.22);
 }
 
 .cosmic-button-primary {
-  background: rgba(99, 102, 241, 0.2);
-  border: 1px solid rgba(129, 140, 248, 0.35);
+  background: rgba(244, 214, 78, 0.18);
+  border: 1px solid rgba(244, 214, 78, 0.42);
   backdrop-filter: blur(10px);
-  box-shadow: 0 0 15px -3px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 15px -3px rgba(244, 214, 78, 0.2);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .cosmic-button-primary:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.32);
-  border-color: rgba(165, 180, 252, 0.5);
-  box-shadow: 0 0 25px -2px rgba(99, 102, 241, 0.35);
+  background: rgba(244, 214, 78, 0.32);
+  border-color: rgba(255, 237, 157, 0.65);
+  box-shadow: 0 0 25px -2px rgba(244, 214, 78, 0.35);
 }
 
 /* Space-time distortion glow vignette */
 .gravitational-vignette {
-  background: radial-gradient(circle at 50% 50%, transparent 60%, rgba(0, 0, 0, 0.75) 100%);
+  background: radial-gradient(circle at 50% 46%, transparent 65%, rgba(0, 0, 0, 0.68) 100%);
   pointer-events: none;
+}
+
+.refind-search-form {
+  min-height: 68px;
+  border: 1px solid rgba(244, 214, 78, 0.38) !important;
+  background: rgba(7, 7, 9, 0.96) !important;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.055), 0 0 28px rgba(244, 214, 78, 0.055), 0 12px 40px rgba(0, 0, 0, 0.72) !important;
+}
+
+.refind-search-form.is-focused,
+.refind-search-form:focus-within {
+  border-color: rgba(244, 214, 78, 0.9) !important;
+  box-shadow: 0 0 0 1px rgba(244, 214, 78, 0.18), 0 0 32px rgba(244, 214, 78, 0.12) !important;
+}
+
+.refind-search-form.is-hovered:not(:focus-within) {
+  border-color: rgba(244, 214, 78, 0.62) !important;
+}
+
+.refind-search-input {
+  min-width: 0;
+  caret-color: var(--accent);
+}
+
+.refind-search-form > div:last-child {
+  flex-shrink: 0;
+}
+
+.refind-search-submit {
+  color: #12110d !important;
+  border: 1px solid #f4d64e !important;
+  background: #f4d64e !important;
+  box-shadow: 0 0 22px rgba(244, 214, 78, 0.12) !important;
+}
+
+.refind-search-submit:hover:not(:disabled) {
+  background: #ffe577 !important;
+  border-color: #ffe577 !important;
+}
+
+.refind-search-submit:disabled {
+  color: #12110d !important;
+  opacity: 0.48;
+}
+
+.refind-search-suggestions {
+  justify-content: center;
+  padding-top: 0.5rem;
+}
+
+.refind-search-suggestions > button {
+  background: rgba(18, 18, 20, 0.88);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.refind-search-suggestions > button:hover {
+  border-color: rgba(244, 214, 78, 0.48);
+  background: rgba(244, 214, 78, 0.07);
+}
+
+/* Keep keyboard focus visible without adding a second ring inside search. */
+:where(header, main) :where(a, button, input:not(.refind-search-input), select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The indigo palette is gold in this theme; solid buttons need dark text. */
+button.bg-indigo-600,
+button.bg-indigo-500 {
+  color: #12110d;
+}
+
+main input::placeholder {
+  color: #a1a1aa;
+  opacity: 1;
+}
+
+.refind-home-layout {
+  padding-top: clamp(2.5rem, 7vh, 5.5rem);
+  padding-bottom: clamp(3rem, 8vh, 6.5rem);
+}
+
+.refind-home-content {
+  max-width: 68rem;
+  gap: 1.4rem;
+}
+
+.cat-mascot {
+  /* Transparent frames extracted from the supplied cat video. */
+  background: url("/refind-cat-motion.webp") center / contain no-repeat;
+  aspect-ratio: 11 / 5;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 1px rgba(255, 236, 164, 0.5))
+    drop-shadow(0 0 28px rgba(244, 214, 78, 0.09));
+}
+
+.refind-home-mascot {
+  display: block;
+  width: min(42rem, 88vw);
+  margin: -0.5rem auto -0.75rem;
+}
+
+.page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.page-heading__copy {
+  min-width: 0;
+}
+
+.page-heading__cat {
+  flex: 0 0 auto;
+  width: 15rem;
+  margin: -0.5rem 0;
+}
+
+.search-empty-cat {
+  display: block;
+  width: min(20rem, 65vw);
+  margin: 0 auto;
+}
+
+@media (max-width: 640px) {
+  /* Keep all four labeled navigation items inside narrow screens. */
+  header nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  header nav > a {
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  main :is(input[type="text"], input[type="search"], input:not([type]), textarea, select) {
+    font-size: 1rem;
+  }
+
+  .refind-search-suggestions > button {
+    min-height: 44px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .refind-search-submit {
+    min-height: 44px;
+  }
+
+  .refind-home-layout {
+    padding-top: 2.5rem;
+  }
+
+  .refind-home-content {
+    gap: 1rem;
+  }
+
+  .refind-home-mascot {
+    width: min(34rem, 88vw);
+  }
+
+  .refind-search-form {
+    min-height: 58px;
+  }
+
+  .page-heading {
+    align-items: flex-start;
+  }
+
+  .page-heading__cat {
+    width: 6rem;
+    margin: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cat-mascot {
+    background-image: url("/refind-cat-still.webp");
+  }
 }
