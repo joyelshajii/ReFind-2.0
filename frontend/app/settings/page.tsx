@@ -120,6 +120,10 @@ const PLANS: PlanConfig[] = [
   },
 ];
 
+function formatNumber(num: number): string {
+  return Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 const DEFAULT_ACCOUNT: AccountProfile = {
   name: "Joyel Shaji",
   email: "joyel.shaji@refind.local",
@@ -402,8 +406,8 @@ export default function SettingsPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="font-mono text-zinc-300 font-medium">
-              Used: <strong className="text-white font-bold">{tokenUsage.toLocaleString()}</strong> of{" "}
-              <strong className="text-indigo-300">{currentPlan.tokenLimit.toLocaleString()} tokens</strong>
+              Used: <strong className="text-white font-bold">{formatNumber(tokenUsage)}</strong> of{" "}
+              <strong className="text-indigo-300">{formatNumber(currentPlan.tokenLimit)} tokens</strong>
             </span>
             <span className="font-mono font-bold text-white">{tokenPercent}%</span>
           </div>
@@ -418,7 +422,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-zinc-400 font-mono">
             <span>Cycle: {currentPlan.tokenRefreshPeriod} • Next reset in {nextResetTime}</span>
             <span>
-              Remaining: {(currentPlan.tokenLimit - tokenUsage).toLocaleString()} tokens
+              Remaining: {formatNumber(currentPlan.tokenLimit - tokenUsage)} tokens
             </span>
           </div>
         </div>
@@ -430,7 +434,7 @@ export default function SettingsPage() {
               Search & Retrieval
             </span>
             <span className="text-base font-bold text-white font-mono">
-              {(tokenUsage * 0.35).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} tokens
+              {formatNumber(tokenUsage * 0.35)} tokens
             </span>
           </div>
           <div className="p-3.5 rounded-xl bg-black/50 border border-white/[0.06] space-y-1">
@@ -438,7 +442,7 @@ export default function SettingsPage() {
               Vision & OCR Extraction
             </span>
             <span className="text-base font-bold text-white font-mono">
-              {(tokenUsage * 0.45).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} tokens
+              {formatNumber(tokenUsage * 0.45)} tokens
             </span>
           </div>
           <div className="p-3.5 rounded-xl bg-black/50 border border-white/[0.06] space-y-1">
@@ -446,7 +450,7 @@ export default function SettingsPage() {
               Context Reasoning
             </span>
             <span className="text-base font-bold text-white font-mono">
-              {(tokenUsage * 0.20).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} tokens
+              {formatNumber(tokenUsage * 0.20)} tokens
             </span>
           </div>
         </div>
@@ -670,7 +674,7 @@ export default function SettingsPage() {
             <Clock className="w-4 h-4 text-zinc-400" />
             Last Indexed:
           </span>
-          <span className="text-zinc-100 font-medium">
+          <span suppressHydrationWarning className="text-zinc-100 font-medium">
             {stats?.last_indexed_at ? new Date(stats.last_indexed_at).toLocaleString() : statsError ? "Unavailable" : "Never"}
           </span>
         </div>
