@@ -28,7 +28,7 @@ ReFind is built for students, researchers, creators, and professionals whose use
 
 ## Product Demo
 
-**Demo link: [https://drive.google.com/file/d/1M_KNdKrgbycN0uvKrU_QxxoJSVBLHlLL/view?usp=sharing].**
+**Demo link: https://drive.google.com/file/d/1M_KNdKrgbycN0uvKrU_QxxoJSVBLHlLL/view.**
 
 <!-- Replace the placeholder above with your public video, hosted app, or presentation link before the AIBoomi submission. Example: [Watch the ReFind demo](YOUR_PUBLIC_DEMO_URL) -->
 
