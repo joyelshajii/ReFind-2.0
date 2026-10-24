@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { getErrorMessage, getIndexStats, getHealth } from "@/lib/api";
 import { IndexStats } from "@/types";
+import CatMascot from "@/components/CatMascot";
 
 interface AccountProfile {
   name: string;
@@ -238,7 +239,7 @@ export default function SettingsPage() {
   const nextResetTime = activePlan === "free" ? "2h 45m" : activePlan === "premium" ? "1h 18m" : "42m";
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10 space-y-10">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-10">
       {/* Toast Feedback */}
       {feedback && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-indigo-950/90 border border-indigo-500/50 text-indigo-200 text-sm shadow-[0_8px_32px_rgba(0,0,0,0.8)] backdrop-blur-md animate-in fade-in slide-in-from-bottom-2">
@@ -248,17 +249,20 @@ export default function SettingsPage() {
       )}
 
       {/* Page Title */}
-      <div className="space-y-2" data-grav-mass="1.2">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] backdrop-blur-md text-xs sm:text-sm text-indigo-400 font-mono font-medium">
-          <Sliders className="w-4 h-4" />
-          System Preferences & Account
+      <div className="page-heading" data-grav-mass="1.2">
+        <div className="page-heading__copy space-y-2">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] backdrop-blur-md text-xs sm:text-sm text-indigo-400 font-mono font-medium">
+            <Sliders className="w-4 h-4" />
+            System Preferences & Account
+          </div>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white">
+            Settings & Membership
+          </h1>
+          <p className="text-base text-zinc-300">
+            Manage your account profile, membership plan, rolling token quota, and data privacy.
+          </p>
         </div>
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white">
-          Settings & Membership
-        </h1>
-        <p className="text-base text-zinc-300">
-          Manage your account profile, membership plan, rolling token quota, and data privacy.
-        </p>
+        <CatMascot className="page-heading__cat hidden md:block" />
       </div>
 
       {/* SECTION 1: Account & Profile Management */}
@@ -302,7 +306,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
             {/* User Identity Pill */}
             <div className="flex items-center gap-4 col-span-1 md:col-span-2">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 border border-indigo-400/40 flex items-center justify-center text-white font-bold text-xl shadow-[0_0_20px_rgba(99,102,241,0.35)] shrink-0">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-indigo-600 border border-indigo-400/40 flex items-center justify-center text-white font-bold text-xl shadow-[0_0_20px_rgba(244,214,78,0.35)] shrink-0">
                 {account.name
                   .split(" ")
                   .map((n) => n[0])
@@ -368,7 +372,7 @@ export default function SettingsPage() {
             </div>
             <button
               onClick={handleToggleLogin}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600/40 hover:bg-indigo-600/60 border border-indigo-500/40 text-white text-sm font-medium transition-all shadow-[0_0_15px_rgba(99,102,241,0.25)]"
+              className="px-5 py-2.5 rounded-xl bg-indigo-600/40 hover:bg-indigo-600/60 border border-indigo-500/40 text-white text-sm font-medium transition-all shadow-[0_0_15px_rgba(244,214,78,0.25)]"
             >
               Sign In to ReFind
             </button>
@@ -410,7 +414,7 @@ export default function SettingsPage() {
 
           <div className="w-full h-3 rounded-full bg-white/[0.08] overflow-hidden p-0.5">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 transition-all duration-500 shadow-[0_0_12px_rgba(99,102,241,0.5)]"
+              className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-emerald-400 transition-all duration-500 shadow-[0_0_12px_rgba(244,214,78,0.5)]"
               style={{ width: `${tokenPercent}%` }}
             />
           </div>
@@ -472,7 +476,7 @@ export default function SettingsPage() {
                 key={plan.id}
                 className={`relative p-6 rounded-2xl flex flex-col justify-between transition-all duration-300 backdrop-blur-xl ${
                   isSelected
-                    ? "bg-gradient-to-b from-indigo-950/40 via-black/70 to-black/80 border-2 border-indigo-400/70 shadow-[0_0_35px_rgba(99,102,241,0.25)] ring-1 ring-indigo-400/30"
+                    ? "bg-gradient-to-b from-indigo-950/40 via-black/70 to-black/80 border-2 border-indigo-400/70 shadow-[0_0_35px_rgba(244,214,78,0.25)] ring-1 ring-indigo-400/30"
                     : plan.highlight
                     ? "bg-black/55 border border-purple-500/30 hover:border-purple-400/60 shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
                     : "bg-black/45 border border-white/[0.08] hover:border-white/[0.18] shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
@@ -480,7 +484,7 @@ export default function SettingsPage() {
               >
                 {/* Badge */}
                 {plan.badge && (
-                  <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(99,102,241,0.5)]">
+                  <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 text-white text-xs font-mono font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(244,214,78,0.5)]">
                     {plan.badge}
                   </div>
                 )}
@@ -557,7 +561,7 @@ export default function SettingsPage() {
                       className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all shadow-md ${
                         plan.id === "pro"
                           ? "bg-gradient-to-r from-amber-500/30 via-purple-600/30 to-indigo-600/30 hover:from-amber-500/50 hover:to-indigo-600/50 text-white border border-amber-500/40"
-                          : "bg-indigo-600/30 hover:bg-indigo-600/50 text-white border border-indigo-500/40 hover:shadow-[0_0_20px_rgba(99,102,241,0.3)]"
+                          : "bg-indigo-600/30 hover:bg-indigo-600/50 text-white border border-indigo-500/40 hover:shadow-[0_0_20px_rgba(244,214,78,0.3)]"
                       }`}
                     >
                       {activePlan === "pro" && plan.id === "free"
@@ -760,7 +764,7 @@ export default function SettingsPage() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white transition-all shadow-[0_0_15px_rgba(99,102,241,0.4)]"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white transition-all shadow-[0_0_15px_rgba(244,214,78,0.4)]"
                 >
                   Save Changes
                 </button>

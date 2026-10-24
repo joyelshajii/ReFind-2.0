@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Settings, ShieldCheck, HardDrive, ArrowUpRight } from "lucide-react";
 import SearchBar from "@/components/SearchBar";
 import { getErrorMessage, getIndexStats } from "@/lib/api";
+import CatMascot from "@/components/CatMascot";
 import { IndexStats } from "@/types";
 
 export default function HomePage() {
@@ -24,16 +25,16 @@ export default function HomePage() {
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-4 py-16 sm:py-24 relative overflow-hidden">
+    <div className="refind-home-layout flex-1 flex flex-col items-center justify-center px-4 sm:px-6 relative overflow-hidden">
       {/* Central Interactive Hub with gravitational mass anchor */}
       <div
         data-grav-mass="2.0"
-        className="w-full max-w-2xl flex flex-col items-center text-center space-y-7 relative z-10"
+        className="refind-home-content w-full flex flex-col items-center text-center relative z-10"
       >
         {/* Brand Header */}
         <div className="space-y-4">
           <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] backdrop-blur-md text-xs sm:text-sm text-zinc-300 font-mono">
-            <span className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_#818cf8]" />
+            <span className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_#f4d64e]" />
             <span className="font-semibold text-zinc-200">BitByBit</span>
             <span className="text-zinc-600">/</span>
             <span className="text-zinc-300">Local-First Digital Memory</span>
@@ -48,13 +49,15 @@ export default function HomePage() {
           </p>
         </div>
 
+        <CatMascot className="refind-home-mascot" />
+
         {/* Large Pill-Shaped Search Box matching reference composition */}
-        <div className="w-full pt-1">
-          <SearchBar autoFocus />
+        <div className="w-full max-w-5xl pt-1">
+          <SearchBar autoFocus showPerimeterEffects={false} />
         </div>
 
         {/* Below the search box section */}
-        <div className="w-full flex flex-col items-center gap-4 pt-6 border-t border-white/[0.08]">
+        <div className="w-full max-w-5xl flex flex-col items-center gap-4 pt-6 border-t border-white/[0.09]">
           <span className="text-xs uppercase tracking-[0.25em] text-zinc-400 font-mono font-medium">
             Search your digital memory
           </span>

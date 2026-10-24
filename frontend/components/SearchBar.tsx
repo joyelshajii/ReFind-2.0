@@ -9,6 +9,7 @@ interface SearchBarProps {
   autoFocus?: boolean;
   onSearch?: (query: string) => void;
   isLoading?: boolean;
+  showPerimeterEffects?: boolean;
 }
 
 interface EdgeDotParticle {
@@ -28,6 +29,7 @@ export default function SearchBar({
   autoFocus = false,
   onSearch,
   isLoading = false,
+  showPerimeterEffects = true,
 }: SearchBarProps) {
   const [query, setQuery] = useState(initialQuery);
   const [isFocused, setIsFocused] = useState(false);
@@ -39,6 +41,8 @@ export default function SearchBar({
 
   // High fidelity canvas effect: Continuous 3D glowing dots around search bar with gravitational parallax
   useEffect(() => {
+    if (!showPerimeterEffects) return;
+
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
@@ -330,7 +334,7 @@ export default function SearchBar({
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("mousemove", handleWindowMouseMove);
     };
-  }, [isFocused, isHovered]);
+  }, [isFocused, isHovered, showPerimeterEffects]);
 
   const handleSubmit = (e?: FormEvent) => {
     if (e) e.preventDefault();
@@ -373,7 +377,7 @@ export default function SearchBar({
   ];
 
   return (
-    <div className="w-full flex flex-col items-center gap-3">
+    <div className="refind-search-bar w-full flex flex-col items-center gap-3">
       {/* Search Input Box Wrapper */}
       <div
         ref={containerRef}
@@ -383,23 +387,19 @@ export default function SearchBar({
         className="w-full relative flex items-center justify-center"
       >
         {/* Spatial Distortion Canvas (3D Black Hole Accretion Disk & Perimeter Lensing) */}
-        <canvas
-          ref={canvasRef}
-          aria-hidden="true"
-          className="absolute -top-24 -bottom-24 -left-24 -right-24 w-[calc(100%+192px)] h-[calc(100%+192px)] pointer-events-none z-0"
-        />
+        {showPerimeterEffects && (
+          <canvas
+            ref={canvasRef}
+            aria-hidden="true"
+            className="absolute -top-24 -bottom-24 -left-24 -right-24 w-[calc(100%+192px)] h-[calc(100%+192px)] pointer-events-none z-0"
+          />
+        )}
 
         {/* The Search Bar: Wide, compact height, pitch black glass, low contrast border */}
         <form
           data-grav-input="true"
           onSubmit={handleSubmit}
-          className={`w-full relative z-10 flex items-center rounded-full bg-black/95 transition-all duration-300 px-4 py-2 sm:py-2.5 border ${
-            isFocused
-              ? "border-white/[0.22] shadow-[0_12px_45px_rgba(0,0,0,0.98),0_0_1px_1px_rgba(255,255,255,0.18)]"
-              : isHovered
-              ? "border-white/[0.16] shadow-[0_10px_35px_rgba(0,0,0,0.95)]"
-              : "border-white/[0.10] shadow-[0_8px_30px_rgba(0,0,0,0.90)]"
-          }`}
+          className={`refind-search-form w-full relative z-10 flex items-center rounded-full transition-all duration-300 px-4 py-2 sm:py-2.5 ${isFocused ? "is-focused" : isHovered ? "is-hovered" : ""}`}
         >
           {/* Extremely subtle interior bevel for glass depth */}
           <div className="absolute inset-0 rounded-full pointer-events-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.06),inset_0_-1px_1px_rgba(0,0,0,0.9)]" />
@@ -419,7 +419,7 @@ export default function SearchBar({
             onBlur={() => setIsFocused(false)}
             autoFocus={autoFocus}
             placeholder="What do you remember? (e.g. Rahul's architecture PDF around February with BLE...)"
-            className="w-full py-3 sm:py-3.5 text-base sm:text-lg text-zinc-100 placeholder:text-zinc-400/80 bg-transparent focus:outline-none font-normal"
+            className="refind-search-input w-full py-3 sm:py-3.5 text-base sm:text-lg text-zinc-100 placeholder:text-zinc-400/80 bg-transparent focus:outline-none font-normal"
           />
 
           {/* Clear button */}
@@ -439,7 +439,7 @@ export default function SearchBar({
             <button
               type="submit"
               disabled={!query.trim() || isLoading}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/[0.08] hover:bg-white/[0.16] disabled:opacity-40 disabled:hover:bg-white/[0.08] text-white text-sm font-medium border border-white/[0.12] hover:border-white/[0.24] transition-all shadow-[0_0_15px_-3px_rgba(255,255,255,0.06)]"
+              className="refind-search-submit flex items-center gap-2 px-5 py-2.5 rounded-full disabled:opacity-40 transition-all text-sm font-semibold"
             >
               {isLoading ? (
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -455,7 +455,7 @@ export default function SearchBar({
       </div>
 
       {/* Quick-try memory suggestions */}
-      <div className="w-full flex flex-wrap items-center justify-start gap-2 pt-1.5">
+      <div className="refind-search-suggestions w-full flex flex-wrap items-center gap-2">
         <span className="text-xs sm:text-sm text-zinc-400 flex items-center gap-1.5 mr-1 font-mono font-medium">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
           Try memory:
