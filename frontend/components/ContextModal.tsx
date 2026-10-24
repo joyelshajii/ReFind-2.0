@@ -43,13 +43,13 @@ export default function ContextModal({ result, query, onClose }: ContextModalPro
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
       <div
         data-grav-mass="2.0"
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-black/80 border border-white/[0.12] shadow-[0_16px_50px_rgba(0,0,0,0.9),0_0_40px_-10px_rgba(99,102,241,0.25)] overflow-hidden backdrop-blur-2xl"
+        className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-black/80 border border-white/[0.12] shadow-[0_16px_50px_rgba(0,0,0,0.9),0_0_40px_-10px_rgba(244,214,78,0.16)] overflow-hidden backdrop-blur-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/[0.08] flex items-center justify-between bg-black/40">
           <div className="flex items-center gap-3.5">
-            <div className="p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.2)]">
+            <div className="p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-400 shadow-[0_0_12px_rgba(244,214,78,0.14)]">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -79,7 +79,7 @@ export default function ContextModal({ result, query, onClose }: ContextModalPro
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-400">
-              <span className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shadow-[0_0_12px_rgba(99,102,241,0.5)]" />
+              <span className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shadow-[0_0_12px_rgba(244,214,78,0.32)]" />
               <span className="text-sm font-mono">Correlating memory clues with indexed evidence...</span>
             </div>
           ) : (
@@ -102,7 +102,7 @@ export default function ContextModal({ result, query, onClose }: ContextModalPro
                           key={idx}
                           className="p-3 rounded-lg bg-black/40 border border-white/[0.06] text-sm text-zinc-200 flex items-center gap-2.5"
                         >
-                          <span className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_6px_#818cf8]" />
+                          <span className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_6px_#f4d64e]" />
                           <span className="font-medium">{clue}</span>
                         </div>
                       ))

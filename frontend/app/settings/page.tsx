@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { getErrorMessage, getIndexStats, getHealth } from "@/lib/api";
 import { IndexStats } from "@/types";
+import CatMascot from "@/components/CatMascot";
 
 export default function SettingsPage() {
   const [stats, setStats] = useState<IndexStats | null>(null);
@@ -42,15 +43,18 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10 space-y-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-8">
       {/* Title */}
-      <div className="space-y-2" data-grav-mass="1.2">
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white">
-          Settings & Architecture
-        </h1>
-        <p className="text-base text-zinc-300">
-          Manage data sources, monitor vector index health, and review privacy controls.
-        </p>
+      <div className="page-heading" data-grav-mass="1.2">
+        <div className="page-heading__copy space-y-2">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white">
+            Settings & Architecture
+          </h1>
+          <p className="text-base text-zinc-300">
+            Manage data sources, monitor vector index health, and review privacy controls.
+          </p>
+        </div>
+        <CatMascot className="page-heading__cat hidden md:block" />
       </div>
 
       {/* Section 1: Data Sources */}

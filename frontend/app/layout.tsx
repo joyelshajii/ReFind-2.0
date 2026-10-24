@@ -18,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark h-full antialiased">
-      <body className="min-h-full flex flex-col bg-black text-zinc-100 font-sans selection:bg-indigo-500/25 selection:text-indigo-200 relative overflow-x-hidden text-base">
+      <body className="min-h-full flex flex-col bg-[#070709] text-zinc-100 font-sans selection:bg-[#f4d64e]/25 selection:text-[#fff1ae] relative overflow-x-hidden text-base">
         {/* Deep space gravitational distortion particle canvas */}
         <GravitationalField />
 
@@ -29,7 +29,7 @@ export default function RootLayout({
         <div className="relative z-10 flex-1 flex flex-col">
           <Navbar />
           <main className="flex-1 flex flex-col">{children}</main>
-          <footer className="border-t border-white/[0.08] bg-black/40 backdrop-blur-md py-6 text-center text-sm text-zinc-400 font-mono">
+          <footer className="border-t border-white/[0.09] bg-[#080809]/75 backdrop-blur-md py-6 text-center text-sm text-zinc-400 font-mono">
             <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
               <span className="tracking-wide">ReFind · Find what you remember</span>
               <span>Built by <strong className="text-zinc-200 font-medium tracking-wider">BitByBit</strong></span>

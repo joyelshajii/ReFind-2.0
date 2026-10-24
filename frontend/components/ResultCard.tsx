@@ -101,13 +101,13 @@ export default function ResultCard({
       data-grav-mass={isBestMatch ? "1.4" : "1.0"}
       className={`group relative rounded-2xl transition-all duration-300 border backdrop-blur-xl ${
         isBestMatch
-          ? "bg-black/60 border-indigo-500/40 shadow-[0_8px_32px_rgba(0,0,0,0.8),0_0_25px_-5px_rgba(99,102,241,0.2)] hover:border-indigo-400/60"
+          ? "bg-black/60 border-indigo-500/40 shadow-[0_8px_32px_rgba(0,0,0,0.8),0_0_25px_-5px_rgba(244,214,78,0.14)] hover:border-indigo-400/60"
           : "bg-black/40 hover:bg-black/60 border-white/[0.07] hover:border-white/[0.18] shadow-[0_8px_24px_rgba(0,0,0,0.6)]"
       }`}
     >
       {/* Top Best Match Ribbon if #1 */}
       {isBestMatch && (
-        <div className="absolute -top-3.5 left-4 px-3 py-1 rounded-full bg-gradient-to-r from-indigo-950 via-zinc-900 to-indigo-950 border border-indigo-500/40 text-indigo-300 text-xs font-mono tracking-wider uppercase shadow-[0_0_15px_-2px_rgba(99,102,241,0.4)] flex items-center gap-1.5 font-semibold">
+        <div className="absolute -top-3.5 left-4 px-3 py-1 rounded-full bg-gradient-to-r from-indigo-950 via-zinc-900 to-indigo-950 border border-indigo-500/40 text-indigo-300 text-xs font-mono tracking-wider uppercase shadow-[0_0_15px_-2px_rgba(244,214,78,0.26)] flex items-center gap-1.5 font-semibold">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
           <span>Best Match</span>
         </div>
@@ -157,7 +157,7 @@ export default function ResultCard({
             <div
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-mono font-semibold border backdrop-blur-md ${
                 result.score >= 0.7
-                  ? "bg-indigo-950/40 text-indigo-300 border-indigo-500/40 shadow-[0_0_12px_rgba(99,102,241,0.2)]"
+                  ? "bg-indigo-950/40 text-indigo-300 border-indigo-500/40 shadow-[0_0_12px_rgba(244,214,78,0.14)]"
                   : result.score >= 0.5
                   ? "bg-emerald-950/40 text-emerald-300 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
                   : "bg-white/[0.04] text-zinc-200 border-white/[0.1]"
@@ -248,7 +248,7 @@ export default function ResultCard({
             <button
               type="button"
               onClick={() => onShowContext(result)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/45 text-indigo-200 text-sm font-medium border border-indigo-500/40 hover:border-indigo-400/60 transition-all shadow-[0_0_15px_-3px_rgba(99,102,241,0.25)]"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/45 text-indigo-200 text-sm font-medium border border-indigo-500/40 hover:border-indigo-400/60 transition-all shadow-[0_0_15px_-3px_rgba(244,214,78,0.18)]"
             >
               <Info className="w-4 h-4" />
               <span>Show Context</span>

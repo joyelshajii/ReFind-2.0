@@ -3,11 +3,12 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Search, Filter, AlertCircle, ArrowLeft } from "lucide-react";
+import { Filter, AlertCircle, ArrowLeft } from "lucide-react";
 import SearchBar from "@/components/SearchBar";
 import ResultCard from "@/components/ResultCard";
 import ContextModal from "@/components/ContextModal";
 import { getErrorMessage, searchDocuments } from "@/lib/api";
+import CatMascot from "@/components/CatMascot";
 import { SearchResponse, SearchResultItem } from "@/types";
 
 function SearchResultsContent() {
@@ -48,7 +49,7 @@ function SearchResultsContent() {
   }, [initialQuery]);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Top Search Bar & Back button */}
       <div className="space-y-4" data-grav-mass="1.3">
         <div className="flex items-center justify-between">
@@ -78,7 +79,7 @@ function SearchResultsContent() {
       {/* Loading state with subtle progressive memory stages */}
       {loading && (
         <div className="p-8 rounded-2xl bg-black/50 border border-white/[0.08] backdrop-blur-xl flex flex-col items-center justify-center gap-3.5 text-center shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
-          <div className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shadow-[0_0_12px_rgba(99,102,241,0.5)]" />
+          <div className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shadow-[0_0_12px_rgba(244,214,78,0.32)]" />
           <div className="space-y-1.5">
             <p className="text-base font-semibold text-zinc-100">Understanding your memory...</p>
             <p className="text-sm text-zinc-300 font-mono">
@@ -165,10 +166,8 @@ function SearchResultsContent() {
             </div>
           ) : (
             /* Empty State matching specifications */
-            <div className="p-10 rounded-2xl bg-black/40 border border-white/[0.08] backdrop-blur-xl text-center space-y-4">
-              <div className="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.1] text-zinc-300 flex items-center justify-center mx-auto">
-                <Search className="w-6 h-6" />
-              </div>
+            <div className="p-8 sm:p-10 rounded-3xl bg-black/55 border border-white/[0.09] backdrop-blur-xl text-center space-y-4 shadow-[0_18px_60px_rgba(0,0,0,0.38)]">
+              <CatMascot className="search-empty-cat" />
               <div className="space-y-1.5">
                 <h3 className="text-lg font-semibold text-zinc-100">
                   We couldn't find a strong match.
