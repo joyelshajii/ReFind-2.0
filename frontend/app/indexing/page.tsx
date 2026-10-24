@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import IndexProgress from "@/components/IndexProgress";
 import MediaIndexingQueue from "@/components/MediaIndexingQueue";
+import CatMascot from "@/components/CatMascot";
 import {
   getIndexStatus,
   triggerIndexing,
@@ -338,19 +339,22 @@ export default function IndexingPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10 space-y-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-8">
       {/* Title Header */}
-      <div className="space-y-2.5" data-grav-mass="1.2">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] backdrop-blur-md text-xs sm:text-sm text-indigo-400 font-mono font-medium">
-          <HardDrive className="w-4 h-4" />
-          Local Files Connector
+      <div className="page-heading" data-grav-mass="1.2">
+        <div className="page-heading__copy space-y-2.5">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] backdrop-blur-md text-xs sm:text-sm text-indigo-400 font-mono font-medium">
+            <HardDrive className="w-4 h-4" />
+            Local Files Connector
+          </div>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white">
+            Digital Memory Indexing
+          </h1>
+          <p className="text-base text-zinc-300">
+            Index local files into the high-dimensional vector space and relational metadata store.
+          </p>
         </div>
-        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-white">
-          Digital Memory Indexing
-        </h1>
-        <p className="text-base text-zinc-300">
-          Index local files into the high-dimensional vector space and relational metadata store.
-        </p>
+        <CatMascot className="page-heading__cat hidden md:block" />
       </div>
 
       {/* Main Live Progress Indicator */}
@@ -392,7 +396,7 @@ export default function IndexingPage() {
             <button
               onClick={handleIndexFolder}
               disabled={isBusy || !folderPathInput.trim()}
-              className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/45 disabled:opacity-50 text-white text-sm font-medium border border-indigo-500/40 transition-all shadow-[0_0_15px_-3px_rgba(99,102,241,0.25)]"
+              className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/45 disabled:opacity-50 text-white text-sm font-medium border border-indigo-500/40 transition-all shadow-[0_0_15px_-3px_rgba(244,214,78,0.18)]"
             >
               <FolderGit2 className="w-4 h-4" />
               <span>{status.is_indexing ? "Indexing..." : "Scan & Index Folder"}</span>
@@ -414,7 +418,7 @@ export default function IndexingPage() {
         onClick={() => { if (!isBusy) fileInputRef.current?.click(); }}
         className={`p-8 sm:p-10 rounded-2xl border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-3.5 text-center backdrop-blur-md ${
           dragActive
-            ? "border-indigo-400/80 bg-indigo-950/20 shadow-[0_0_30px_rgba(99,102,241,0.2)]"
+            ? "border-indigo-400/80 bg-indigo-950/20 shadow-[0_0_30px_rgba(244,214,78,0.14)]"
             : "border-white/[0.12] hover:border-white/[0.24] bg-black/40 hover:bg-black/60"
         }`}
       >
@@ -426,7 +430,7 @@ export default function IndexingPage() {
           className="hidden"
           onChange={(e: ChangeEvent<HTMLInputElement>) => handleFileUpload(e.target.files)}
         />
-        <div className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center text-indigo-400 shadow-[0_0_15px_-3px_rgba(99,102,241,0.2)]">
+        <div className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center text-indigo-400 shadow-[0_0_15px_-3px_rgba(244,214,78,0.14)]">
           <UploadCloud className="w-7 h-7" />
         </div>
         <div className="space-y-1">
@@ -554,7 +558,7 @@ export default function IndexingPage() {
                 onClick={() => setSelectedFormat(fmt)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-mono uppercase tracking-wider transition-all border font-medium ${
                   selectedFormat === fmt
-                    ? "bg-indigo-600/30 text-indigo-200 border-indigo-500/45 shadow-[0_0_10px_rgba(99,102,241,0.2)]"
+                    ? "bg-indigo-600/30 text-indigo-200 border-indigo-500/45 shadow-[0_0_10px_rgba(244,214,78,0.14)]"
                     : "bg-white/[0.02] text-zinc-300 hover:text-white border-white/[0.06] hover:border-white/[0.14]"
                 }`}
               >

@@ -46,7 +46,7 @@ export default function IndexProgress({ status }: IndexProgressProps) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2.5">
           {status.is_indexing ? (
-            <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+            <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shadow-[0_0_8px_rgba(244,214,78,0.32)]" />
           ) : isComplete ? (
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
           ) : isError ? (
@@ -82,7 +82,7 @@ export default function IndexProgress({ status }: IndexProgressProps) {
               key={stage}
               className={`p-3.5 rounded-xl border flex flex-col gap-1.5 transition-all ${
                 isActive
-                  ? "bg-indigo-950/30 border-indigo-500/50 shadow-[0_0_15px_-3px_rgba(99,102,241,0.3)]"
+                  ? "bg-indigo-950/30 border-indigo-500/50 shadow-[0_0_15px_-3px_rgba(244,214,78,0.18)]"
                   : isDone
                   ? "bg-white/[0.03] border-emerald-500/30 text-emerald-300"
                   : "bg-black/30 border-white/[0.06] text-zinc-500"
@@ -113,7 +113,7 @@ export default function IndexProgress({ status }: IndexProgressProps) {
             className={`h-full transition-all duration-300 ${
               isComplete
                 ? "bg-emerald-400 shadow-[0_0_8px_#34d399]"
-                : "bg-gradient-to-r from-indigo-500 to-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.6)]"
+                : "bg-gradient-to-r from-indigo-500 to-indigo-400 shadow-[0_0_10px_rgba(244,214,78,0.35)]"
             }`}
             style={{ width: `${percent}%` }}
           />
