@@ -3,13 +3,28 @@ import uuid
 import hashlib
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import Column, String, Integer, BigInteger, Text, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Integer, BigInteger, Float, Text, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.db.base import Base, is_pgvector_active
 from app.core.config import settings
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
+
+
+class MediaIndexJob(Base):
+    __tablename__ = "media_index_jobs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    filepath = Column(String(1024), nullable=False, unique=True)
+    filename = Column(String(512), nullable=False)
+    fingerprint = Column(String(64), nullable=False)
+    duration_seconds = Column(Float, nullable=True)
+    status = Column(String(32), nullable=False, default="awaiting", index=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 class Document(Base):
     __tablename__ = "documents"

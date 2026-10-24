@@ -17,7 +17,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.base import SessionLocal
 from app.db.models import Document, Chunk, Entity
 from app.schemas.index import IndexProgressStatus
-from app.processors.factory import process_file, get_file_type
+from app.processors.factory import process_file, get_file_type, AUDIO_TYPES, VIDEO_TYPES, MEDIA_TYPES
+from app.services.audio_service import AUDIO_PROCESSOR_VERSION, SEGMENT_SECONDS, OVERLAP_SECONDS
+from app.services.video_service import VIDEO_PROCESSOR_VERSION, VIDEO_SEGMENT_SECONDS, VIDEO_OVERLAP_SECONDS, VIDEO_FRAME_INTERVAL
+from app.services.media_preflight import inspect_media, MEDIA_POLICY_VERSION, MediaConfirmationRequired
 from app.connectors.local_source import LocalFileSource
 from app.services.embedding_service import (
     get_embedding_with_provenance, expected_embedding_provenance,
@@ -97,6 +100,14 @@ def _find_existing_document(db: Session, filepath: str):
 
 
 def _document_embeddings_match_configuration(doc: Document) -> bool:
+    if (settings.LOCAL_FAST_MODE and doc.file_type in MEDIA_TYPES
+            and inspect_media(doc.filepath).strategy == "direct"):
+        required_task = "retrieval.audio" if doc.file_type in AUDIO_TYPES else "retrieval.video"
+        media_chunks = [chunk for chunk in doc.chunks
+                        if (chunk.get_embedding_provenance() or {}).get("task") in {"retrieval.audio", "retrieval.video"}]
+        if (not any(chunk.get_embedding_provenance().get("task") == required_task for chunk in media_chunks)
+                or any(not chunk.get_embedding() for chunk in media_chunks)):
+            return False
     expected_doc = expected_embedding_provenance(
         "retrieval.image" if doc.file_type in IMAGE_TYPES else "retrieval.passage"
     )
@@ -115,13 +126,24 @@ def _document_embeddings_match_configuration(doc: Document) -> bool:
 def _processing_state_matches(doc: Document, file_type: str, signature: str) -> bool:
     if doc.processing_signature == signature:
         return True
-    if file_type not in IMAGE_TYPES and not doc.processing_signature:
+    if file_type not in IMAGE_TYPES | MEDIA_TYPES and not doc.processing_signature:
         return True
     try:
         stored = json.loads(doc.processing_signature or "{}")
         current = json.loads(signature)
     except (TypeError, ValueError):
         return False
+
+    if (file_type in MEDIA_TYPES and current.get("strategy") == "direct"
+            and "media_policy" not in stored):
+        from app.services.media_preflight import companion_files
+        # Existing complete direct media vectors remain valid. A new transcript
+        # or any companion requires the new inspection policy to run.
+        if not companion_files(doc.filepath):
+            legacy_current = {key: value for key, value in current.items()
+                              if key not in {"media_policy", "strategy", "media_fingerprint"}}
+            stored["media_embedding_config"] = stored.get("audio_embedding_config")
+            return all(stored.get(key) == value for key, value in legacy_current.items())
 
     # Older signatures included embedding provider settings. Only compare
     # fields that affect extracted text, chunks, or OCR so a vector-space
@@ -135,6 +157,10 @@ def _processing_state_matches(doc: Document, file_type: str, signature: str) -> 
 def _refresh_document_embeddings(doc: Document, db: Session):
     """Refresh vectors from already extracted text without decoding/reprocessing the file."""
     embedding_started = time.perf_counter()
+    if doc.file_type in MEDIA_TYPES:
+        # Media vectors must be regenerated from samples, never timestamp labels.
+        _index_single_file_locked(doc.filepath, db, force_reprocess=True)
+        return time.perf_counter() - embedding_started, 0.0
     image_doc = doc.file_type in IMAGE_TYPES and settings.LOCAL_FAST_MODE
     texts = []
     if not image_doc:
@@ -183,6 +209,11 @@ def try_reserve_indexing_run() -> bool:
     indexing_status.is_indexing = True
     return True
 
+
+def release_indexing_run():
+    indexing_status.is_indexing = False
+    _indexing_run_lock.release()
+
 IMAGE_TYPES = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"}
 PIPELINE_VERSION = 3
 
@@ -219,6 +250,22 @@ def _processing_signature(filepath: str, file_type: str) -> str:
     else:
         signature["chunk_size"] = settings.CHUNK_SIZE
         signature["chunk_overlap"] = settings.CHUNK_OVERLAP
+    if file_type in MEDIA_TYPES:
+        plan = inspect_media(filepath)
+        signature.update({"media_policy": MEDIA_POLICY_VERSION, "strategy": plan.strategy,
+                          "media_fingerprint": plan.fingerprint,
+                          "local_fast_mode": bool(settings.LOCAL_FAST_MODE)})
+        if plan.strategy == "direct":
+            signature.update({
+                "audio_processor": AUDIO_PROCESSOR_VERSION,
+                "segment_seconds": SEGMENT_SECONDS, "overlap_seconds": OVERLAP_SECONDS,
+                "media_embedding_config": expected_embedding_provenance("retrieval.audio")["config_id"],
+            })
+            if file_type in VIDEO_TYPES:
+                signature.update(video_processor=VIDEO_PROCESSOR_VERSION,
+                                 video_segment_seconds=VIDEO_SEGMENT_SECONDS,
+                                 video_overlap_seconds=VIDEO_OVERLAP_SECONDS,
+                                 video_frame_interval=VIDEO_FRAME_INTERVAL)
     return json.dumps(signature, sort_keys=True, separators=(",", ":"))
 
 
@@ -379,6 +426,8 @@ def _process_file_timed(filepath: str):
 
 def _index_folder_local_fast(db: Session, files: list[dict], metrics: dict) -> None:
     """Reuse CPU extraction workers across the entire scan."""
+    # Finish short recordings before a long movie holds an extraction batch.
+    files = sorted(files, key=lambda item: item.get("file_size", 0))
     with ThreadPoolExecutor(max_workers=max(1, min(settings.INDEX_EXTRACTION_WORKERS, 4))) as pool:
         _index_folder_local_fast_batches(db, files, metrics, pool)
 
@@ -414,7 +463,13 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                 stage_started = time.perf_counter()
                 current_hash = _compute_index_hash(filepath)
                 existing_doc = _find_existing_document(db, filepath)
-                current_signature = _processing_signature(filepath, file_type)
+                try:
+                    current_signature = _processing_signature(filepath, file_type)
+                except Exception as error:
+                    metrics["failed_files"] += 1
+                    _record_index_error(filename, error)
+                    indexing_status.processed_files = file_index + 1
+                    continue
                 metrics["hash_seconds"] += time.perf_counter() - stage_started
                 unchanged = bool(
                     existing_doc
@@ -440,6 +495,12 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                             metrics["indexed_images"] += 1
                             metrics["image_index_seconds"] += time.perf_counter() - file_started
                     except Exception as refresh_error:
+                        if isinstance(refresh_error, MediaConfirmationRequired):
+                            from app.services.media_jobs import defer_media
+                            defer_media(refresh_error.plan)
+                            metrics["deferred_files"] = metrics.get("deferred_files", 0) + 1
+                            indexing_status.processed_files = file_index + 1
+                            continue
                         metrics["failed_files"] += 1
                         logger.error("Failed to refresh embeddings for %s: %s", filepath, refresh_error, exc_info=True)
                         _record_index_error(filename, refresh_error)
@@ -491,6 +552,12 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                             if is_image and not extracted_data.get("image_embedding"):
                                 raise RuntimeError("Local image embedding did not produce a vector.")
                         except Exception as file_error:
+                            if isinstance(file_error, MediaConfirmationRequired):
+                                from app.services.media_jobs import defer_media
+                                defer_media(file_error.plan)
+                                metrics["deferred_files"] = metrics.get("deferred_files", 0) + 1
+                                indexing_status.processed_files = item["file_index"] + 1
+                                continue
                             metrics["failed_files"] += 1
                             logger.error("Failed to process %s: %s", item["filepath"], file_error, exc_info=True)
                             _record_index_error(item["filename"], file_error)
@@ -523,7 +590,7 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                 metrics["extraction_seconds"] += time.perf_counter() - extraction_batch_started
 
             if pending:
-                indexing_status.current_stage = "Embedding"
+                indexing_status.current_stage = "Understanding"
                 text_inputs = []
                 for item in pending:
                     item["doc_text_position"] = None
@@ -533,7 +600,7 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                         text_inputs.append(item["extracted_text"][:1500] or item["filename"])
                     for chunk_index, chunk in enumerate(item["chunks"]):
                         chunk_text = chunk.get("content", "").strip()
-                        if chunk_text:
+                        if chunk_text and chunk.get("_embedding") is None:
                             item["chunk_positions"][chunk_index] = len(text_inputs)
                             text_inputs.append(chunk_text)
 
@@ -593,7 +660,11 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                             chunk_text = chunk_info.get("content", "").strip()
                             if not chunk_text:
                                 continue
-                            chunk_vector, chunk_provenance = text_vectors[item["chunk_positions"][chunk_index]]
+                            if chunk_info.get("_embedding") is not None:
+                                chunk_vector = chunk_info["_embedding"]
+                                chunk_provenance = chunk_info["_embedding_provenance"]
+                            else:
+                                chunk_vector, chunk_provenance = text_vectors[item["chunk_positions"][chunk_index]]
                             chunk_model = Chunk(
                                 document_id=doc.id,
                                 chunk_index=chunk_index,
@@ -610,6 +681,9 @@ def _index_folder_local_fast_batches(db, files, metrics, extraction_pool):
                                 entity_type=entity["entity_type"],
                                 entity_value=entity["entity_value"],
                             ))
+                        if item["file_type"] in MEDIA_TYPES:
+                            from app.services.media_jobs import complete_media_request
+                            complete_media_request(db, doc.filepath)
                         db.commit()
                         metrics["indexed_files"] = metrics.get("indexed_files", 0) + 1
                         if item["file_type"] in IMAGE_TYPES:
@@ -679,7 +753,10 @@ def index_folder_background(folder_path: str, _lock_reserved: bool = False, _dis
 
         if settings.LOCAL_FAST_MODE:
             _index_folder_local_fast(db, files, metrics)
-            indexing_status.current_stage = "Error" if metrics["failed_files"] else "Complete"
+            indexing_status.current_stage = (
+                "Error" if metrics["failed_files"] else
+                "Awaiting confirmation" if metrics.get("deferred_files") else "Complete"
+            )
             indexing_status.last_indexed_at = datetime.utcnow()
             indexing_status.is_indexing = False
             indexing_status.current_file = None
@@ -700,7 +777,13 @@ def index_folder_background(folder_path: str, _lock_reserved: bool = False, _dis
                 stage_started = time.perf_counter()
                 current_hash = _compute_index_hash(filepath)
                 existing_doc = _find_existing_document(db, filepath)
-                current_signature = _processing_signature(filepath, file_type)
+                try:
+                    current_signature = _processing_signature(filepath, file_type)
+                except Exception as error:
+                    metrics["failed_files"] += 1
+                    _record_index_error(filename, error)
+                    indexing_status.processed_files = idx + 1
+                    continue
                 metrics["hash_seconds"] += time.perf_counter() - stage_started
 
                 content_state_matches = existing_doc and _processing_state_matches(
@@ -728,6 +811,12 @@ def index_folder_background(folder_path: str, _lock_reserved: bool = False, _dis
                             metrics["image_index_seconds"] += time.perf_counter() - file_started
                         logger.info("Refreshed embeddings from stored text for unchanged file: %s", filename)
                     except Exception as refresh_error:
+                        if isinstance(refresh_error, MediaConfirmationRequired):
+                            from app.services.media_jobs import defer_media
+                            defer_media(refresh_error.plan)
+                            metrics["deferred_files"] = metrics.get("deferred_files", 0) + 1
+                            indexing_status.processed_files = idx + 1
+                            continue
                         metrics["failed_files"] += 1
                         logger.error("Failed to refresh embeddings for %s: %s", filepath, refresh_error, exc_info=True)
                         _record_index_error(filename, refresh_error)
@@ -743,6 +832,12 @@ def index_folder_background(folder_path: str, _lock_reserved: bool = False, _dis
                     raw_chunks = extracted_data.get("chunks", [])
                 except Exception as file_error:
                     metrics["extraction_seconds"] += time.perf_counter() - stage_started
+                    if isinstance(file_error, MediaConfirmationRequired):
+                        from app.services.media_jobs import defer_media
+                        defer_media(file_error.plan)
+                        metrics["deferred_files"] = metrics.get("deferred_files", 0) + 1
+                        indexing_status.processed_files = idx + 1
+                        continue
                     metrics["failed_files"] += 1
                     logger.error("Failed to process %s: %s", filepath, file_error, exc_info=True)
                     _record_index_error(filename, file_error)
@@ -836,6 +931,9 @@ def index_folder_background(folder_path: str, _lock_reserved: bool = False, _dis
                             entity_value=ent["entity_value"]
                         ))
 
+                    if file_type in MEDIA_TYPES:
+                        from app.services.media_jobs import complete_media_request
+                        complete_media_request(db, doc.filepath)
                     db.commit()
                     metrics["indexed_files"] += 1
                     if is_image:
@@ -850,7 +948,10 @@ def index_folder_background(folder_path: str, _lock_reserved: bool = False, _dis
                     metrics["database_seconds"] += time.perf_counter() - stage_started
                 indexing_status.processed_files = idx + 1
 
-        indexing_status.current_stage = "Error" if metrics["failed_files"] else "Complete"
+        indexing_status.current_stage = (
+            "Error" if metrics["failed_files"] else
+            "Awaiting confirmation" if metrics.get("deferred_files") else "Complete"
+        )
         indexing_status.last_indexed_at = datetime.utcnow()
         indexing_status.is_indexing = False
         indexing_status.current_file = None
@@ -919,7 +1020,7 @@ def index_single_file(filepath: str, db: Session) -> Document:
         return _index_single_file_locked(filepath, db)
 
 
-def _index_single_file_locked(filepath: str, db: Session) -> Document:
+def _index_single_file_locked(filepath: str, db: Session, force_reprocess: bool = False) -> Document:
     """
     Synchronously indexes a single uploaded or new file.
     Includes unchanged-file check: does not regenerate embeddings if unchanged.
@@ -928,6 +1029,9 @@ def _index_single_file_locked(filepath: str, db: Session) -> Document:
     path = Path(filepath)
     file_type = get_file_type(filepath)
     stat = path.stat()
+    indexing_status.is_indexing = True
+    indexing_status.current_file = path.name
+    indexing_status.current_stage = "Reading"
     current_hash = _compute_index_hash(filepath)
     current_signature = _processing_signature(filepath, file_type)
 
@@ -935,20 +1039,24 @@ def _index_single_file_locked(filepath: str, db: Session) -> Document:
     content_state_matches = existing_doc and _processing_state_matches(
         existing_doc, file_type, current_signature
     )
-    if content_state_matches and existing_doc.file_hash == current_hash and current_hash and current_signature:
+    if not force_reprocess and content_state_matches and existing_doc.file_hash == current_hash and current_hash and current_signature:
         if _document_embeddings_match_configuration(existing_doc):
             logger.info("File %s is unchanged. Returning existing indexed document.", path.name)
             return existing_doc
+        indexing_status.current_stage = "Understanding"
         _refresh_document_embeddings(existing_doc, db)
+        indexing_status.current_stage = "Indexing"
         logger.info("Refreshed embeddings from stored text for unchanged file %s.", path.name)
         return existing_doc
 
+    indexing_status.current_stage = "Extracting"
     extract_started = time.perf_counter()
     extracted_data = process_file(filepath)
     extracted_text = extracted_data.get("extracted_text", "")
     raw_chunks = extracted_data.get("chunks", [])
     extraction_seconds = time.perf_counter() - extract_started
 
+    indexing_status.current_stage = "Understanding"
     embedding_started = time.perf_counter()
     is_image = file_type in IMAGE_TYPES
     text_inputs = []
@@ -959,7 +1067,7 @@ def _index_single_file_locked(filepath: str, db: Session) -> Document:
     chunk_positions = {}
     for chunk_index, chunk_data in enumerate(raw_chunks):
         chunk_text = chunk_data.get("content", "").strip()
-        if chunk_text:
+        if chunk_text and chunk_data.get("_embedding") is None:
             chunk_positions[chunk_index] = len(text_inputs)
             text_inputs.append(chunk_text)
     text_embeddings = embed_texts_with_provenance(text_inputs, task="retrieval.passage")
@@ -970,7 +1078,9 @@ def _index_single_file_locked(filepath: str, db: Session) -> Document:
             raise RuntimeError("Local image embedding did not produce a vector.")
     else:
         doc_embedding, doc_embedding_provenance = text_embeddings[doc_text_position]
-    chunk_embeddings = [(None, None)] * len(raw_chunks)
+    chunk_embeddings = [
+        (chunk.get("_embedding"), chunk.get("_embedding_provenance")) for chunk in raw_chunks
+    ]
     for chunk_index, vector_position in chunk_positions.items():
         chunk_embeddings[chunk_index] = text_embeddings[vector_position]
     entities_data = extract_entities_from_text(extracted_text)
@@ -981,6 +1091,7 @@ def _index_single_file_locked(filepath: str, db: Session) -> Document:
 
     embedding_seconds = time.perf_counter() - embedding_started
 
+    indexing_status.current_stage = "Indexing"
     db_started = time.perf_counter()
     try:
         doc = existing_doc
@@ -1031,6 +1142,9 @@ def _index_single_file_locked(filepath: str, db: Session) -> Document:
                 entity_value=ent["entity_value"]
             ))
 
+        if file_type in MEDIA_TYPES:
+            from app.services.media_jobs import complete_media_request
+            complete_media_request(db, doc.filepath)
         db.commit()
         db.refresh(doc)
     except Exception:

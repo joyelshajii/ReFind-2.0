@@ -93,7 +93,6 @@ def _get_embeddinggemma_model():
                 revision=settings.LOCAL_EMBEDDING_MODEL_REVISION,
                 device=device,
                 local_files_only=True,
-                config_kwargs={"audio_config": None},
                 model_kwargs={"torch_dtype": dtype},
             )
             if device == "cuda":
@@ -279,6 +278,30 @@ def embed_image_with_provenance(image):
         return list(stored[0]), dict(stored[1])
 
 
+def embed_audio_with_provenance(waveform):
+    """Embed a decoded mono 16 kHz segment in the shared text/audio space."""
+    if not settings.LOCAL_FAST_MODE:
+        raise RuntimeError("Direct audio embeddings require LOCAL_FAST_MODE.")
+    samples = np.asarray(waveform, dtype=np.float32)
+    if samples.ndim != 1 or not samples.size or not np.isfinite(samples).all():
+        raise ValueError("Audio must contain finite mono samples at 16 kHz.")
+    provenance = _embeddinggemma_provenance("retrieval.audio")
+    with _inference_slot():
+        model = _get_embeddinggemma_model()
+        vector = model.encode(
+            {"audio": samples},
+            processing_kwargs={"audio": {"sampling_rate": 16000}},
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        vector = np.asarray(vector, dtype=np.float32).reshape(-1)
+        if (vector.shape != (settings.EMBEDDING_DIMENSION,)
+                or not np.isfinite(vector).all() or np.linalg.norm(vector) < 1e-6):
+            raise ValueError("EmbeddingGemma returned an invalid audio vector.")
+    return vector.tolist(), provenance
+
+
 def local_embedding_runtime_stats():
     """Return local model warm-up and runtime details for logging/benchmarks."""
     return {
@@ -289,6 +312,30 @@ def local_embedding_runtime_stats():
         "device": _local_model_device,
         "precision": _local_model_precision,
     }
+
+
+def embed_video_with_provenance(frames):
+    """Encode a short sequence of sampled frames without a video codec backend."""
+    if not settings.LOCAL_FAST_MODE:
+        raise RuntimeError("Direct video embeddings require LOCAL_FAST_MODE.")
+    if not frames:
+        raise ValueError("A video segment must contain frames.")
+    provenance = _embeddinggemma_provenance("retrieval.video")
+    with _inference_slot():
+        model = _get_embeddinggemma_model()
+        vector = model.encode(
+            {"video": frames},
+            processing_kwargs={"video": {
+                "fps": None, "max_frames": len(frames), "max_soft_tokens": 70,
+                "add_timestamps": False,
+            }},
+            show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True,
+        )
+        vector = np.asarray(vector, dtype=np.float32).reshape(-1)
+        if (vector.shape != (settings.EMBEDDING_DIMENSION,)
+                or not np.isfinite(vector).all() or np.linalg.norm(vector) < 1e-6):
+            raise ValueError("EmbeddingGemma returned an invalid video vector.")
+    return vector.tolist(), provenance
 
 
 @contextmanager
@@ -589,7 +636,7 @@ def embedding_signature_is_compatible(stored_provenance, query_provenance=None) 
         }
     if stored.get("provider") == "embeddinggemma":
         return {stored.get("task"), query_provenance.get("task")} <= {
-            "retrieval.query", "retrieval.passage", "retrieval.image"
+            "retrieval.query", "retrieval.passage", "retrieval.image", "retrieval.audio", "retrieval.video"
         }
     return True
 

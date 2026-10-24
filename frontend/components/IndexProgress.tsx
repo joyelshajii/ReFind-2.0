@@ -11,16 +11,31 @@ const STAGES = ["Reading", "Extracting", "Understanding", "Indexing"];
 
 export default function IndexProgress({ status }: IndexProgressProps) {
   const getStageIndex = (stage: string) => {
-    return STAGES.indexOf(stage);
+    if (!stage) return -1;
+    const s = stage.toLowerCase();
+    if (s === "embedding") return 2; // maps to "Understanding"
+    return STAGES.findIndex((item) => item.toLowerCase() === s);
   };
 
   const currentStageIdx = getStageIndex(status.current_stage);
   const isComplete = status.current_stage.toLowerCase() === "complete";
   const isError = status.current_stage.toLowerCase() === "error";
 
-  const percent = status.total_files > 0
-    ? Math.min(100, Math.round((status.processed_files / status.total_files) * 100))
-    : isComplete ? 100 : 0;
+  let percent = 0;
+  if (isComplete) {
+    percent = 100;
+  } else if (status.total_files > 0) {
+    if (status.is_indexing) {
+      const stageProgress = currentStageIdx >= 0 ? (currentStageIdx + 0.5) / STAGES.length : 0;
+      percent = Math.min(95, Math.round(((status.processed_files + stageProgress) / status.total_files) * 100));
+    } else {
+      percent = Math.min(100, Math.round((status.processed_files / status.total_files) * 100));
+    }
+  }
+
+  const currentFileNumber = status.is_indexing && status.total_files > 0
+    ? Math.min(status.total_files, Math.max(1, status.processed_files + (currentStageIdx >= 0 ? 1 : 0)))
+    : status.processed_files;
 
   return (
     <div
@@ -51,8 +66,8 @@ export default function IndexProgress({ status }: IndexProgressProps) {
         </div>
 
         <div className="text-sm font-mono text-zinc-300">
-          <span className="text-white font-semibold">{status.processed_files}</span> /{" "}
-          <span>{status.total_files} files</span>
+          <span className="text-white font-semibold">{currentFileNumber}</span> /{" "}
+          <span>{status.total_files} {status.total_files === 1 ? "file" : "files"}</span>
         </div>
       </div>
 

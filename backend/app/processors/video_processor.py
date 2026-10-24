@@ -40,6 +40,11 @@ def _format_duration(seconds: float) -> str:
 def _probe_media(file_path: Path) -> Optional[Dict[str, Any]]:
     ffprobe_bin = shutil.which("ffprobe")
     if not ffprobe_bin:
+        try:
+            from app.services.media_metadata import probe_local_media
+            return probe_local_media(file_path)
+        except Exception as error:
+            logger.debug("Video metadata unavailable for %s: %s", file_path.name, error)
         return None
     try:
         cmd = [
@@ -160,6 +165,14 @@ def _extract_all_subtitles(file_path: Path, subtitle_streams: List[Dict[str, Any
                         all_entries.append((lang.upper(), start_time, text))
             except Exception as exc:
                 logger.debug("Failed extracting embedded subtitle stream %d from %s: %s", idx, file_path.name, exc)
+
+    if not ffmpeg_bin and subtitle_streams:
+        try:
+            from app.services.media_metadata import read_local_subtitles
+            for language, start, content in read_local_subtitles(file_path):
+                all_entries.append((language, _format_duration(start), content))
+        except Exception as error:
+            logger.warning("Unable to extract embedded subtitles from %s: %s", file_path.name, error)
 
     # 2. External sidecar subtitle files (.srt, .vtt)
     for companion_ext in [".srt", ".vtt", ".sub"]:
@@ -312,6 +325,9 @@ def process_video(file_path: str) -> Dict[str, Any]:
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Video file not found: {file_path}")
+    from app.services.media_preflight import inspect_media, require_media_permission, transcript_chunks
+    plan = inspect_media(path)
+    require_media_permission(plan)
 
     filename = path.name
     stat = path.stat()
@@ -385,10 +401,20 @@ def process_video(file_path: str) -> Dict[str, Any]:
             chapters.append(f"[{ch_start}] {ch_title}")
 
     # 1. DEEP SUBTITLE EXTRACTION: Extract full dialogue across all tracks
-    subtitle_chunks = _extract_all_subtitles(path, subtitle_streams)
+    subtitle_chunks = transcript_chunks(plan)
 
     # 2. DEEP SCENE ANALYSIS: Sample keyframes across video for scene descriptions & OCR
-    scenes = _analyze_video_scenes(path, duration_sec)
+    media_chunks = []
+    if plan.transcript:
+        scenes = []
+    elif settings.LOCAL_FAST_MODE:
+        from app.services.video_service import build_video_chunks
+        media_chunks = build_video_chunks(path)
+        duration_sec = max(chunk["_embedding_provenance"]["end_seconds"] for chunk in media_chunks)
+        duration_str = _format_duration(duration_sec)
+        scenes = []
+    else:
+        scenes = _analyze_video_scenes(path, duration_sec)
 
     # Check companion .meta.json
     sidecar_meta = Path(f"{file_path}.meta.json")
@@ -443,8 +469,7 @@ def process_video(file_path: str) -> Dict[str, Any]:
 
     # Append full subtitle sample/dialogue
     if subtitle_chunks:
-        sample_subs = "\n\n".join([c["content"] for c in subtitle_chunks[:5]])
-        text_lines.append(f"\nDialogue & Subtitles Script:\n{sample_subs}")
+        text_lines.append(f"\nDialogue & Subtitles Script ({', '.join(plan.sources)}):\n{plan.transcript}")
 
     extracted_text = "\n".join(text_lines).strip()
 
@@ -517,6 +542,8 @@ def process_video(file_path: str) -> Dict[str, Any]:
         })
         chunk_page += 1
 
+    chunks.extend(media_chunks)
+
     return {
         "extracted_text": extracted_text,
         "summary": summary,
@@ -534,5 +561,9 @@ def process_video(file_path: str) -> Dict[str, Any]:
             "chapters": chapters,
             "subtitles_extracted": len(subtitle_chunks) > 0,
             "scenes_analyzed": len(scenes),
+            "visual_segments": sum(chunk["_embedding_provenance"]["task"] == "retrieval.video" for chunk in media_chunks),
+            "audio_segments": sum(chunk["_embedding_provenance"]["task"] == "retrieval.audio" for chunk in media_chunks),
+            "content_indexing": plan.strategy,
+            "text_sources": list(plan.sources),
         }
     }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import GravitationalField from "@/components/GravitationalField";
+import QuickSearchPalette from "@/components/QuickSearchPalette";
 
 const fontSansClass = "font-sans";
 const fontMonoClass = "font-mono";
@@ -28,6 +29,7 @@ export default function RootLayout({
         {/* UI Content Layer above particle canvas */}
         <div className="relative z-10 flex-1 flex flex-col">
           <Navbar />
+          <QuickSearchPalette />
           <main className="flex-1 flex flex-col">{children}</main>
           <footer className="border-t border-white/[0.08] bg-black/40 backdrop-blur-md py-6 text-center text-sm text-zinc-400 font-mono">
             <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">

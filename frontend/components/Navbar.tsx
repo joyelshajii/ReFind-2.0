@@ -63,6 +63,18 @@ export default function Navbar() {
           })}
         </nav>
 
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event("refind:open-quick-search"))}
+          aria-label="Open quick search"
+          title="Quick search (Alt+Space or Ctrl+K)"
+          className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-zinc-400 transition-colors hover:border-white/20 hover:text-white"
+        >
+          <Search className="h-3.5 w-3.5" />
+          <span className="hidden xl:inline">Quick search</span>
+          <kbd className="hidden rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] xl:inline">Alt Space</kbd>
+        </button>
+
         {/* Engine Status indicator */}
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-xs text-zinc-200 backdrop-blur-md">

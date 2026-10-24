@@ -1,6 +1,9 @@
 from pathlib import Path
+import os
+import subprocess
+import sys
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, load_only, selectinload
 from sqlalchemy import or_, func
@@ -8,8 +11,10 @@ from app.db.base import get_db
 from app.db.models import Document, Chunk, Entity
 from app.schemas.document import DocumentSchema, DocumentDetailSchema
 from app.schemas.search import ContextDetailResponse
+from app.core.config import settings
 from app.services.query_parser import parse_query
 from app.services.context_explainer import generate_context_explanation
+from app.services.index_removal import clear_index, remove_document
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
@@ -46,7 +51,11 @@ def list_documents(
     ids = []
     visible = 0
     for row in query.with_entities(Document.id, Document.filepath).order_by(Document.indexed_at.desc()).all():
-        if not Path(row.filepath).exists():
+        try:
+            available = Path(row.filepath).is_file()
+        except OSError:
+            available = False
+        if not available:
             continue
         if visible >= offset:
             ids.append(row.id)
@@ -90,71 +99,44 @@ def list_documents(
 @router.delete("", status_code=status.HTTP_200_OK)
 @router.delete("/", status_code=status.HTTP_200_OK)
 def delete_all_documents(db: Session = Depends(get_db)):
-    """
-    Clears the entire index without deleting the original files on disk.
-    """
-    from app.services.indexer import indexing_status
-
-    documents = db.query(Document).all()
-    removed_count = len(documents)
-    
-    # Delete entities and chunks then documents
-    db.query(Entity).delete()
-    db.query(Chunk).delete()
-    db.query(Document).delete()
-    db.commit()
-
-    # Reset indexing status
-    indexing_status.is_indexing = False
-    indexing_status.total_files = 0
-    indexing_status.processed_files = 0
-    indexing_status.documents_count = 0
-    indexing_status.images_count = 0
-    indexing_status.other_count = 0
-    indexing_status.current_file = ""
-    indexing_status.current_stage = "Idle"
-    indexing_status.error_message = None
-    indexing_status.last_indexed_at = None
-
+    """Clear indexed data, queued jobs, and ReFind's saved upload copies."""
+    try:
+        removed_count, copies_deleted = clear_index(db)
+    except RuntimeError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Could not delete all saved upload copies. Check file permissions and try again.") from error
     return {
         "status": "success",
         "removed_count": removed_count,
+        "copies_deleted": copies_deleted,
         "message": (
             f"Removed {removed_count} indexed file"
             f"{'' if removed_count == 1 else 's'} from memory. "
-            "Original files were not deleted."
+            f"Deleted {copies_deleted} saved upload copies and cleared queued jobs. "
+            "Source files outside ReFind upload storage were not deleted."
         ),
     }
 
 @router.delete("/{document_id}", status_code=status.HTTP_200_OK)
 def delete_document(document_id: str, db: Session = Depends(get_db)):
-    """
-    Removes a document and all its chunks and entities from the index.
-    """
-    from app.services.indexer import indexing_status
-
-    doc = db.query(Document).filter(Document.id == document_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found.")
-
-    filename = doc.filename
-    db.delete(doc)
-    db.commit()
-
-    # Update real-time counts
-    total_docs = db.query(Document).count()
-    indexing_status.processed_files = total_docs
-    indexing_status.total_files = total_docs
-    docs = db.query(Document.file_type).all()
-    doc_count = sum(1 for d in docs if d[0] in ("pdf", "docx", "pptx", "txt"))
-    img_count = sum(1 for d in docs if d[0] in ("png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"))
-    indexing_status.documents_count = doc_count
-    indexing_status.images_count = img_count
-    indexing_status.other_count = max(0, total_docs - doc_count - img_count)
-
+    """Remove a document, its queued job, and its saved upload copy if present."""
+    try:
+        filename, copies_deleted = remove_document(db, document_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except RuntimeError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Could not delete the saved upload copy. Check file permissions and try again.") from error
     return {
         "status": "success",
-        "message": f"Successfully removed '{filename}' from digital memory index."
+        "copies_deleted": copies_deleted,
+        "message": f"Removed '{filename}' and {copies_deleted} saved upload copies. Source files outside ReFind upload storage were preserved."
     }
 
 @router.get("/{document_id}", response_model=DocumentDetailSchema)
@@ -209,7 +191,11 @@ def download_document(document_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Document not found.")
 
     file_path = Path(doc.filepath)
-    if not file_path.exists():
+    try:
+        available = file_path.is_file()
+    except OSError:
+        available = False
+    if not available:
         raise HTTPException(status_code=404, detail=f"File not found on disk: {doc.filepath}")
 
     return FileResponse(
@@ -217,3 +203,33 @@ def download_document(document_id: str, db: Session = Depends(get_db)):
         filename=doc.filename,
         media_type="application/octet-stream"
     )
+
+
+@router.post("/{document_id}/open")
+def open_document(document_id: str, request: Request, db: Session = Depends(get_db)):
+    """Open an indexed original in the local machine's default application."""
+    origin = request.headers.get("origin")
+    if origin and origin not in settings.CORS_ORIGINS:
+        raise HTTPException(status_code=403, detail="This page cannot open local files.")
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    file_path = Path(doc.filepath)
+    try:
+        available = file_path.is_file()
+    except OSError:
+        available = False
+    if not available:
+        raise HTTPException(status_code=404, detail="Original file is no longer available.")
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(file_path))
+        else:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen([opener, str(file_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not open the original file: {exc}") from exc
+
+    return {"status": "opened"}

@@ -92,9 +92,13 @@ def search_documents(
     documents = []
     seen_paths = set()
     for doc in index.documents:
-        if not Path(doc.filepath).exists():
+        try:
+            path = Path(doc.filepath)
+            if not path.is_file():
+                continue
+            canon = str(path.resolve()).lower()
+        except OSError:
             continue
-        canon = str(Path(doc.filepath).resolve()).lower()
         if canon not in seen_paths:
             seen_paths.add(canon)
             documents.append(doc)
@@ -327,6 +331,19 @@ def search_documents(
             and is_direct_visual_embedding
             and best_sem >= settings.SEARCH_SEMANTIC_MIN_SCORE
         )
+        # The winning audio segment was scored in the same model space as the
+        # query. Its timestamp label is not a transcript or a keyword match.
+        audio_content_match = (
+            doc.file_type in AUDIO_TYPES | VIDEO_TYPES
+            and bool(best_chunk_loc and best_chunk_loc.startswith("Audio "))
+            and best_sem >= settings.SEARCH_SEMANTIC_MIN_SCORE
+        )
+        video_content_match = (
+            doc.file_type in VIDEO_TYPES
+            and bool(best_chunk_loc and best_chunk_loc.startswith("Video "))
+            and best_sem >= settings.SEARCH_SEMANTIC_MIN_SCORE
+            and not literal_query
+        )
         # Explicit text lookups remain literal. Natural-language searches can
         # retrieve synonyms/paraphrases using the neural embedding signal.
         semantic_match = (
@@ -334,12 +351,27 @@ def search_documents(
             and best_sem >= settings.SEARCH_SEMANTIC_MIN_SCORE
             and (len(search_keywords) > 1 or bool(re.search(r"\b(?:about|related|describ)\w*\b", query, re.I)))
         )
-        if quoted_terms and not all(term.lower() in doc_lower for term in quoted_terms):
+        if quoted_terms and not audio_content_match and not all(term.lower() in doc_lower for term in quoted_terms):
             continue
-        if total_kws > 0 and kw_matches == 0 and not (semantic_match or (visual_only_match and not literal_query)):
+        if total_kws > 0 and kw_matches == 0 and not (semantic_match or audio_content_match or video_content_match or (visual_only_match and not literal_query)):
             continue
-        if semantic_match and kw_matches == 0 and not visual_only_match:
+        if semantic_match and kw_matches == 0 and not (visual_only_match or audio_content_match or video_content_match):
             matching_clues.append("Semantic similarity")
+
+        if audio_content_match:
+            matching_clues.append("Audio content")
+            evidence_list.append(EvidenceItem(
+                clue_name="Audio content", clue_type="audio",
+                matched_text="The sound in this segment is similar to your search. A verbatim transcript is not available for this match.",
+                location=best_chunk_loc, verified=False,
+            ))
+        if video_content_match:
+            matching_clues.append("Video content")
+            evidence_list.append(EvidenceItem(
+                clue_name="Video content", clue_type="video",
+                matched_text="The sampled visuals in this segment are similar to your search.",
+                location=best_chunk_loc, verified=False,
+            ))
 
         if visual_only_match and kw_matches == 0:
             matching_clues.append("Visual content")
@@ -374,7 +406,7 @@ def search_documents(
             "text_rerankable": (
                 not is_image
                 or has_image_content_text
-            ),
+            ) and not (audio_content_match or video_content_match),
         })
 
     scored_at = time.perf_counter()

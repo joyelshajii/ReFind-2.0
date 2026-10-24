@@ -43,6 +43,8 @@ build/
 dist/
 *.tsbuildinfo
 next-env.d.ts
+desktop/ReFind.Tray/bin/
+desktop/ReFind.Tray/obj/
 
 # ==========================================
 # SQLite databases & WAL / journal files

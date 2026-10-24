@@ -53,11 +53,25 @@ DATABASE_URL=
 ---
 
 ### 3. Install Backend Dependencies & Start FastAPI
-Open your first terminal:
+On Windows, open PowerShell and use the backend virtual environment:
+```powershell
+cd backend
+# Create only if .venv does not already exist:
+if (-not (Test-Path .venv)) { python -m venv .venv }
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+./start-local.ps1
+```
+Use `start-local.ps1` for subsequent starts. A bare `python` or `uvicorn`
+command can select a different Python installation without PyAV or the configured
+embedding dependencies. For development reload, use
+`./.venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload`.
+
+On macOS/Linux:
 ```bash
 cd backend
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 *The backend starts at `http://127.0.0.1:8000` with interactive API docs at `http://127.0.0.1:8000/docs`.*
 
@@ -77,6 +91,20 @@ Open your browser at:
 http://localhost:3000
 ```
 
+### Windows tray search
+
+Run `desktop/install-tray.ps1` from PowerShell once. It builds the native tray
+launcher, starts it immediately, and registers it for your Windows sign-in.
+The launcher appears in the notification area (the arrow at the right of the
+taskbar). Press **Alt+Space** from any app to show the borderless search overlay.
+Type a file name or description, use **Up/Down** to choose a result, and press
+**Enter** or click to open the original in its default application. **Escape**
+closes the overlay. Double-click the tray icon to open search, or right-click it
+to open ReFind in a browser or exit.
+
+The tray launcher starts the local EmbeddingGemma backend if needed. Run
+`desktop/uninstall-tray.ps1` to stop the tray launcher and remove sign-in startup.
+
 ---
 
 ## 🏗️ Default Search Pipeline
@@ -90,9 +118,54 @@ Open context → relevant passages → optional grounded Gemini explanation
 ```
 
 `LOCAL_FAST_MODE=true` takes precedence over the legacy `EMBEDDING_PROVIDER`
-setting. Text and image embeddings stay local. One process keeps one model on
+setting. Text, image, and audio embeddings stay local. One process keeps one model on
 the GPU. The backend warms it at startup and lets searches run between indexing
 batches. On Windows, `backend/start-local.ps1` starts the configured environment.
+
+Media indexing first checks embedded text subtitles, lyrics, and matching companion
+transcripts (`.srt`, `.vtt`, `.lrc`, `.txt`, `.ass`, `.ssa`, `.sub`, and `.meta.json` transcript
+fields). Usable text is embedded directly: no full video/audio decoding or media
+inference runs on that path. Titles, comments, and empty or bitmap subtitle tracks
+do not substitute for a transcript. Upload companion files with the recording or
+later using the same base filename; language suffixes such as `movie.en.srt` work.
+To apply a later transcript, explicitly select the recording again. Uploading a
+companion alone does not reindex older recordings. Folder indexing requires an
+explicit absolute folder path and includes its subfolders. A blank path never
+scans previous uploads or demo files; uploads index only the files selected.
+
+**Remove** deletes an indexed item and its saved copy inside ReFind's upload
+storage, along with associated unshared companions and queued jobs. **Clear Index**
+deletes all indexed data, saved upload copies (including failed/previous uploads),
+and queued jobs. Source files outside upload storage are preserved. Clear remains
+available when the index is empty so saved copies can still be removed. Removal
+is blocked during active indexing; it cannot race an indexing run.
+
+Without usable text, audio recordings are decoded locally with PyAV and indexed with EmbeddingGemma 2's
+audio encoder in 25-second sections with 5 seconds of overlap, covering the entire
+recording. Search for words or ideas you remember hearing to retrieve the original
+audio with the matching time range. These are semantic audio matches, not verified
+verbatim transcripts; supplied `.txt`, `.srt`, and `.lrc` transcripts also support
+literal text search. EmbeddingGemma produces vectors, not written transcriptions.
+Install the updated backend requirements, restart the backend, and reindex audio
+folders once to replace older entries that only indexed metadata. Unchanged audio
+will then reuse its index. Missing decoders or failed audio embeddings are reported
+as indexing errors instead of silently creating metadata-only entries.
+
+Videos without usable transcripts use EmbeddingGemma 2 video embeddings from 8-frame sequences sampled at
+one frame per second, with 2 frames of overlap. The audio track is indexed with
+the same audio pipeline when usable transcript text is unavailable. Search descriptions of
+scenes or remembered dialogue to retrieve the original video and a matching time
+range. Silent videos remain searchable by their visuals. Very brief events between
+sampled frames can be missed. Reindex existing video folders after restarting to
+apply the new inspection policy. Existing compatible direct media indexes are reused.
+
+For media **longer than 15 minutes** without usable text (or with unknown duration),
+the indexing page offers **Continue now**, **Schedule later**, and **Skip for now**.
+No expensive media inference starts until a choice authorizes it. Dates are entered
+in the user's local time and stored in UTC. Scheduled jobs and pending choices are
+saved in the database and survive backend restarts. ReFind must be running to process
+a job; if it was closed at the scheduled time, processing starts on its next run.
+Changed recordings require a fresh choice before a scheduled full-media job runs.
 
 
 ### 5-Signal Scoring Formula

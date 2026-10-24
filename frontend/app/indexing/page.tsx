@@ -5,7 +5,6 @@ import { useEffect, useState, useRef, useCallback, ChangeEvent, DragEvent, useTr
 import {
   FolderGit2,
   UploadCloud,
-  Sparkles,
   RefreshCw,
   FolderOpen,
   CheckCircle2,
@@ -28,11 +27,11 @@ import {
   Copy
 } from "lucide-react";
 import IndexProgress from "@/components/IndexProgress";
+import MediaIndexingQueue from "@/components/MediaIndexingQueue";
 import {
   getIndexStatus,
   triggerIndexing,
   uploadFiles,
-  seedDemoData,
   getIndexedDocuments,
   deleteDocument,
   deleteAllDocuments,
@@ -57,6 +56,7 @@ export default function IndexingPage() {
   const [folderPathInput, setFolderPathInput] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [feedbackIsError, setFeedbackIsError] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,7 +96,9 @@ export default function IndexingPage() {
     }
   };
 
-  // Poll lightweight progress; refresh file data only when the index changes.
+  const isBusy = status.is_indexing || isUploading;
+
+  // Poll lightweight progress; fast polling during active indexing/upload, relaxed when idle.
   useEffect(() => {
     let active = true;
     let inFlight = false;
@@ -123,14 +125,15 @@ export default function IndexingPage() {
       }
     };
     void fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
+    const pollInterval = isBusy ? 400 : 3000;
+    const interval = setInterval(fetchStatus, pollInterval);
     document.addEventListener("visibilitychange", fetchStatus);
     return () => {
       active = false;
       clearInterval(interval);
       document.removeEventListener("visibilitychange", fetchStatus);
     };
-  }, [loadDocuments]);
+  }, [isBusy, loadDocuments]);
 
   // One initial request, and debounce subsequent filter edits.
   useEffect(() => {
@@ -139,33 +142,54 @@ export default function IndexingPage() {
   }, [loadDocuments]);
 
   const handleIndexFolder = async () => {
+    const selectedPath = folderPathInput.trim();
+    if (!selectedPath) {
+      setFeedbackMessage("Enter the full path of the folder you want to index, or select files below.");
+      setFeedbackIsError(true);
+      return;
+    }
+    if (isBusy) return;
+    setFeedbackIsError(false);
     try {
       setFeedbackMessage("Starting directory indexing...");
-      const res = await triggerIndexing(folderPathInput.trim() || undefined);
+      setStatus((prev) => ({
+        ...prev,
+        is_indexing: true,
+        current_stage: "Reading",
+        current_file: "Scanning local directory...",
+        processed_files: 0,
+        error_message: null,
+      }));
+      const res = await triggerIndexing(selectedPath);
       setFeedbackMessage(res.message);
       await refreshStatus();
       loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to start indexing");
-    }
-  };
-
-  const handleSeedDemo = async () => {
-    try {
-      setFeedbackMessage("Generating sample files & starting ingestion...");
-      const res = await seedDemoData();
-      setFeedbackMessage(res.message);
+      setFeedbackIsError(true);
       await refreshStatus();
-      loadDocuments();
-    } catch (err: any) {
-      setFeedbackMessage(err.message || "Failed to seed demo data");
     }
   };
 
   const handleFileUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (isBusy || !files || files.length === 0) return;
     setIsUploading(true);
-    setFeedbackMessage(`Uploading ${files.length} file(s)...`);
+    setFeedbackIsError(false);
+    setFeedbackMessage(`Uploading and indexing ${files.length} file(s)...`);
+
+    const fileNames = Array.from(files).map((f) => f.name);
+    const initialFileName = fileNames[0] || "file";
+
+    // Immediately trigger the visual loading screen with Stage 01 Reading
+    setStatus((prev) => ({
+      ...prev,
+      is_indexing: true,
+      current_stage: "Reading",
+      current_file: initialFileName,
+      processed_files: 0,
+      total_files: files.length,
+      error_message: null,
+    }));
 
     try {
       const formData = new FormData();
@@ -173,45 +197,57 @@ export default function IndexingPage() {
         formData.append("files", files[i]);
       }
       const res = await uploadFiles(formData);
+
       const failed = res.failed_files ?? [];
+      setFeedbackIsError(failed.length > 0);
       const failureSummary = failed.slice(0, 3)
         .map((item) => `${item.filename}: ${item.error}`)
         .join(" | ");
       const remainingFailures = failed.length > 3 ? ` | ${failed.length - 3} more failed` : "";
       setFeedbackMessage([res.message, failureSummary + remainingFailures].filter(Boolean).join(" "));
-      // Refresh status and list
+
+      // Refresh status from database and list
       await refreshStatus();
-      loadDocuments();
+      await loadDocuments();
     } catch (err: unknown) {
+      setStatus((prev) => ({
+        ...prev,
+        is_indexing: false,
+        current_stage: "Error",
+        error_message: getErrorMessage(err, "Failed to upload files"),
+      }));
       setFeedbackMessage(getErrorMessage(err, "Failed to upload files"));
+      setFeedbackIsError(true);
     } finally {
       setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
   const handleDeleteDoc = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to remove "${name}" from indexed memory?`)) return;
+    if (!confirm(`Remove "${name}" from indexed memory and delete its saved ReFind upload copy, if any?\n\nSource files outside ReFind upload storage will be preserved.`)) return;
     setDeletingId(id);
+    setFeedbackIsError(false);
     try {
-      await deleteDocument(id);
-      setFeedbackMessage(`Removed "${name}" from index.`);
+      const res = await deleteDocument(id);
+      setFeedbackMessage(res.message);
       await refreshStatus();
       loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to delete document");
+      setFeedbackIsError(true);
     } finally {
       setDeletingId(null);
     }
   };
 
   const handleClearIndex = async () => {
-    if (documents.length === 0) {
-      setFeedbackMessage("There are no indexed files to remove.");
-      return;
-    }
+    setFeedbackIsError(false);
     if (!confirm(
-      `Remove all ${documents.length} currently listed indexed files?\n\n` +
-      "This clears them from ReFind's index but does not delete the original files."
+      "Clear the entire index, delete all saved ReFind upload copies, and cancel queued indexing jobs?\n\n" +
+      "This includes previous and failed uploads. Source files outside ReFind upload storage will be preserved."
     )) return;
 
     setIsClearingIndex(true);
@@ -223,6 +259,7 @@ export default function IndexingPage() {
       await loadDocuments();
     } catch (err: any) {
       setFeedbackMessage(err.message || "Failed to clear indexed files");
+      setFeedbackIsError(true);
     } finally {
       setIsClearingIndex(false);
     }
@@ -318,10 +355,10 @@ export default function IndexingPage() {
 
       {/* Main Live Progress Indicator */}
       <IndexProgress status={status} />
+      <MediaIndexingQueue />
 
-      {/* Indexing Actions Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Action 1: Select or Index Folder */}
+      {/* Index Local Directory */}
+      <div className="grid grid-cols-1 gap-6">
         <div
           data-grav-mass="1.1"
           className="p-6 rounded-2xl bg-black/45 border border-white/[0.08] backdrop-blur-xl flex flex-col justify-between gap-5 hover:border-white/[0.16] transition-all shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
@@ -332,18 +369,20 @@ export default function IndexingPage() {
               Index Local Directory
             </div>
             <p className="text-sm text-zinc-300 leading-relaxed">
-              Scan a local folder on your computer. ReFind will recursively discover and index supported document and image formats.
+              Index files in the folder you specify, including its subfolders. Choose individual files below if you only want to index selected files.
             </p>
 
             <div className="space-y-2 pt-2">
-              <label className="text-xs font-mono text-zinc-300 uppercase tracking-wider font-medium">
-                Directory Path (optional, defaults to storage uploads):
+              <label htmlFor="index-folder-path" className="text-xs font-mono text-zinc-300 uppercase tracking-wider font-medium">
+                Directory Path (required):
               </label>
               <input
+                id="index-folder-path"
                 type="text"
+                required
                 value={folderPathInput}
                 onChange={(e) => setFolderPathInput(e.target.value)}
-                placeholder="e.g. C:\Users\YourName\Documents or leave blank"
+                placeholder="Full path of the folder you want to index"
                 className="w-full px-4 py-2.5 rounded-xl bg-black/60 border border-white/[0.1] text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-400 font-mono transition-all"
               />
             </div>
@@ -352,7 +391,7 @@ export default function IndexingPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleIndexFolder}
-              disabled={status.is_indexing}
+              disabled={isBusy || !folderPathInput.trim()}
               className="flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/45 disabled:opacity-50 text-white text-sm font-medium border border-indigo-500/40 transition-all shadow-[0_0_15px_-3px_rgba(99,102,241,0.25)]"
             >
               <FolderGit2 className="w-4 h-4" />
@@ -361,40 +400,6 @@ export default function IndexingPage() {
           </div>
         </div>
 
-        {/* Action 2: Demo Quick-Seed */}
-        <div
-          data-grav-mass="1.1"
-          className="p-6 rounded-2xl bg-black/45 border border-white/[0.08] backdrop-blur-xl flex flex-col justify-between gap-5 hover:border-white/[0.16] transition-all shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
-        >
-          <div className="space-y-3.5">
-            <div className="flex items-center gap-2.5 text-indigo-300 font-semibold text-base">
-              <Sparkles className="w-4 h-4 text-indigo-400" />
-              One-Click Demo Dataset (BitByBit)
-            </div>
-            <p className="text-sm text-zinc-300 leading-relaxed">
-              Generate the canonical hackathon test set with messy, realistic filenames (
-              <code className="text-indigo-300 font-mono">final2.pdf</code>,{" "}
-              <code className="text-indigo-300 font-mono">IMG_2384.png</code>,{" "}
-              <code className="text-indigo-300 font-mono">presentation2.pptx</code>) and immediately feed them to the indexer.
-            </p>
-
-            <div className="p-4 rounded-xl bg-black/60 border border-white/[0.08] text-xs sm:text-sm text-zinc-300 space-y-1.5">
-              <strong className="text-indigo-300 block font-mono font-medium">Demonstration Scenario:</strong>
-              <p className="italic text-zinc-300">
-                “Find the architecture PDF Rahul sent me around February. It had PostgreSQL and BLE.”
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleSeedDemo}
-            disabled={status.is_indexing}
-            className="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.10] text-white text-sm font-medium border border-white/[0.1] hover:border-white/[0.2] transition-all"
-          >
-            <RefreshCw className={`w-4 h-4 ${status.is_indexing ? "animate-spin" : ""}`} />
-            <span>Seed Demo Memory & Ingest</span>
-          </button>
-        </div>
       </div>
 
       {/* Drag & Drop File Ingestion Zone */}
@@ -406,7 +411,7 @@ export default function IndexingPage() {
         }}
         onDragLeave={() => setDragActive(false)}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => { if (!isBusy) fileInputRef.current?.click(); }}
         className={`p-8 sm:p-10 rounded-2xl border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-3.5 text-center backdrop-blur-md ${
           dragActive
             ? "border-indigo-400/80 bg-indigo-950/20 shadow-[0_0_30px_rgba(99,102,241,0.2)]"
@@ -417,6 +422,7 @@ export default function IndexingPage() {
           ref={fileInputRef}
           type="file"
           multiple
+          disabled={isBusy}
           className="hidden"
           onChange={(e: ChangeEvent<HTMLInputElement>) => handleFileUpload(e.target.files)}
         />
@@ -425,12 +431,20 @@ export default function IndexingPage() {
         </div>
         <div className="space-y-1">
           <p className="text-base sm:text-lg font-semibold text-zinc-100">
-            {isUploading ? "Uploading & indexing..." : "Drag and drop local files here"}
+            {isUploading
+              ? `Indexing in progress: ${status.current_stage || "Processing"}...`
+              : "Drag and drop local files here"}
           </p>
           <p className="text-sm text-zinc-400">
-            or click to browse from your filesystem
+            {isUploading
+              ? (status.current_file ? `Processing ${status.current_file}` : "Analyzing digital memory...")
+              : "or click to browse from your filesystem"}
           </p>
         </div>
+
+        <p className="max-w-xl text-sm text-zinc-400">
+          Include matching subtitles or transcripts for faster media indexing, such as movie.mkv and movie.srt. SRT, VTT, ASS, SSA, SUB, LRC, and TXT companions are supported.
+        </p>
 
         {/* Supported Formats Pills */}
         <div className="flex items-center gap-2 flex-wrap justify-center pt-2">
@@ -451,7 +465,9 @@ export default function IndexingPage() {
       {feedbackMessage && (
         <div className="p-4 rounded-xl bg-black/60 border border-white/[0.1] backdrop-blur-md text-sm text-zinc-200 font-mono flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            {feedbackIsError
+              ? <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              : <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
             <span>{feedbackMessage}</span>
           </div>
           <button
@@ -508,9 +524,9 @@ export default function IndexingPage() {
             </button>
             <button
               onClick={handleClearIndex}
-              disabled={isLoadingDocs || isClearingIndex || documents.length === 0}
+              disabled={isBusy || isLoadingDocs || isClearingIndex}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-950/30 hover:bg-red-950/50 text-sm font-mono text-red-300 border border-red-800/40 transition-all disabled:opacity-50"
-              title="Remove all indexed files without deleting originals"
+              title="Clear all indexed data, saved upload copies, and queued jobs"
             >
               <Trash2 className={`w-4 h-4 ${isClearingIndex ? "animate-pulse" : ""}`} />
               <span>{isClearingIndex ? "Clearing..." : "Clear Index"}</span>
@@ -628,9 +644,9 @@ export default function IndexingPage() {
 
                   <button
                     onClick={() => handleDeleteDoc(doc.id, doc.filename)}
-                    disabled={deletingId === doc.id}
+                    disabled={isBusy || deletingId === doc.id}
                     className="p-2.5 rounded-lg bg-red-950/25 hover:bg-red-950/45 text-red-300 hover:text-red-200 border border-red-800/35 transition-all disabled:opacity-50"
-                    title="Remove from index"
+                    title="Remove from index and delete its saved upload copy"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -642,7 +658,7 @@ export default function IndexingPage() {
           <div className="p-8 rounded-xl bg-black/40 border border-white/[0.06] text-center space-y-2">
             <p className="text-sm text-zinc-300">No indexed documents match your filter.</p>
             <p className="text-xs text-zinc-400 font-mono">
-              Upload files above or click &ldquo;Seed Demo Memory & Ingest&rdquo;.
+              Upload files above or scan a local folder to add them to your index.
             </p>
           </div>
         )}

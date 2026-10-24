@@ -129,15 +129,24 @@ def _build_index(db, provenance):
         body = row.extracted_text or ""
         documents.append(SearchDocument(
             row.id, row.filename, row.filepath, row.file_type, row.file_size or 0,
-            row.modified_at, row.created_at, body, body.lower(), chunks,
+            row.modified_at, row.created_at, body,
+            (body + "\n" + "\n".join(chunk.content for chunk in chunks)).lower(), chunks,
             MappingProxyType(row.get_embedding_provenance() or {}),
         ))
         # Conservative UTF-32 estimate plus Python object overhead.
-        bytes_used += 4 * (2 * len(body) + sum(len(ch.content) for ch in chunks)) + 2048 + 256 * len(chunks)
+        bytes_used += 8 * (len(body) + sum(len(ch.content) for ch in chunks)) + 2048 + 256 * len(chunks)
         add_vector(row, owner)
         for chunk in sorted(row.chunks, key=lambda ch: ch.chunk_index):
             location = (f"Page {chunk.page_number}" if chunk.page_number
                         else f"Slide {chunk.slide_number}" if chunk.slide_number else None)
+            chunk_provenance = chunk.get_embedding_provenance() or {}
+            if chunk_provenance.get("task") in {"retrieval.audio", "retrieval.video"}:
+                from app.services.audio_service import timestamp
+                label = "Audio" if chunk_provenance["task"] == "retrieval.audio" else "Video"
+                location = (
+                    f"{label} {timestamp(chunk_provenance.get('start_seconds', 0))}"
+                    f"–{timestamp(chunk_provenance.get('end_seconds', 0))}"
+                )
             add_vector(chunk, owner, location, chunk.content)
     matrix = np.stack(vectors) if vectors else np.empty((0, dimension), dtype=np.float32)
     owner_array = np.asarray(owners, dtype=np.intp)

@@ -77,6 +77,24 @@ export interface IndexStats {
   embedding_dimension: number;
 }
 
+export interface MediaIndexJob {
+  id: string;
+  filename: string;
+  duration_seconds: number | null;
+  status: "awaiting" | "queued" | "scheduled" | "running" | "failed" | "completed" | "skipped";
+  scheduled_at: string | null;
+  error_message: string | null;
+}
+
+export interface MediaIndexJob {
+  id: string;
+  filename: string;
+  duration_seconds: number | null;
+  status: "awaiting" | "queued" | "scheduled" | "running" | "failed" | "completed" | "skipped";
+  scheduled_at: string | null;
+  error_message: string | null;
+}
+
 export interface IndexedDocumentItem {
   id: string;
   filename: string;

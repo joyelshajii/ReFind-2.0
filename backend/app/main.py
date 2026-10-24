@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,17 @@ logger = logging.getLogger("refind")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail at startup rather than accept uploads in a Python environment that
+    # cannot inspect or decode media.
+    try:
+        import av
+    except ImportError as error:
+        raise RuntimeError(
+            f"Media dependency PyAV is unavailable in {sys.executable}. "
+            "On Windows, start ReFind with backend/start-local.ps1. "
+            "Install dependencies into that environment with "
+            "backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt."
+        ) from error
     logger.info("Initializing ReFind database schema...")
     try:
         init_db()
@@ -31,9 +43,26 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Local embedding warmup failed; check cached weights and the backend environment")
     logger.info("ReFind backend started successfully.")
+    from app.services.media_jobs import recover_media_jobs, run_next_media_job
+    await asyncio.to_thread(recover_media_jobs)
+
+    async def media_scheduler():
+        while True:
+            try:
+                await asyncio.to_thread(run_next_media_job)
+            except Exception:
+                logger.exception("Unable to process queued media indexing")
+            await asyncio.sleep(5)
+
+    scheduler = asyncio.create_task(media_scheduler())
     try:
         yield
     finally:
+        scheduler.cancel()
+        try:
+            await scheduler
+        except asyncio.CancelledError:
+            pass
         logger.info("ReFind backend shutting down.")
 
 app = FastAPI(

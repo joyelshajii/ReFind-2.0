@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from app.processors import image_processor
 from app.services import embedding_service
@@ -411,10 +411,10 @@ def test_overlapping_folder_index_runs_do_not_repeat_work(isolated_index_db, tmp
         assert db.query(Document).count() == 1
 
 
-def test_upload_and_folder_scan_same_path_are_serialized(isolated_index_db, tmp_path, monkeypatch):
+def test_upload_waits_for_folder_scan_before_replacing_file(isolated_index_db, tmp_path, monkeypatch):
     image_path = tmp_path / "race.png"
     image_path.write_bytes(b"folder version")
-    monkeypatch.setattr(index_api.settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
     monkeypatch.setattr(indexer, "get_embedding_with_provenance", _fake_embedding_with_provenance)
     process_started = threading.Event()
     upload_started = threading.Event()
@@ -439,9 +439,13 @@ def test_upload_and_folder_scan_same_path_are_serialized(isolated_index_db, tmp_
         assert process_started.wait(timeout=5)
         upload_future = executor.submit(upload)
         assert upload_started.wait(timeout=5)
+        with pytest.raises(HTTPException) as busy:
+            upload_future.result(timeout=5)
+        assert busy.value.status_code == 409
+        assert image_path.read_bytes() == b"folder version"
         release_folder.set()
         folder_future.result(timeout=10)
-        result = upload_future.result(timeout=10)
+        result = upload()
 
     assert result["status"] == "success"
     with isolated_index_db() as db:

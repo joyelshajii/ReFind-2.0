@@ -1,9 +1,15 @@
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel
+from typing import Optional, List, Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 class IndexFolderRequest(BaseModel):
-    folder_path: Optional[str] = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+    folder_path: str = Field(min_length=1)
+
+
+class MediaJobDecision(BaseModel):
+    action: Literal["continue", "schedule", "skip"]
+    scheduled_at: Optional[datetime] = None
 
 class IndexProgressStatus(BaseModel):
     is_indexing: bool = False

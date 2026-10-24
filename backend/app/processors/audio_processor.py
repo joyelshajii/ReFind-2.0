@@ -27,6 +27,11 @@ def _format_duration(seconds: float) -> str:
 def _probe_media(file_path: Path) -> Optional[Dict[str, Any]]:
     ffprobe_bin = shutil.which("ffprobe")
     if not ffprobe_bin:
+        try:
+            from app.services.media_metadata import probe_local_media
+            return probe_local_media(file_path)
+        except Exception as error:
+            logger.debug("Audio metadata unavailable for %s: %s", file_path.name, error)
         return None
     try:
         cmd = [
@@ -91,7 +96,7 @@ def _analyze_audio_with_gemini(file_path: Path) -> Optional[str]:
     Extracts a 60-second lightweight audio snippet and analyzes it with Gemini
     to extract lyrics/speech transcript, musical style, mood, and movie/artist context.
     """
-    if not settings.GEMINI_API_KEY:
+    if settings.LOCAL_FAST_MODE or not settings.GEMINI_API_KEY:
         return None
 
     ffmpeg_bin = shutil.which("ffmpeg")
@@ -169,6 +174,9 @@ def process_audio(file_path: str) -> Dict[str, Any]:
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
+    from app.services.media_preflight import inspect_media, require_media_permission, transcript_chunks
+    plan = inspect_media(path)
+    require_media_permission(plan)
 
     filename = path.name
     stat = path.stat()
@@ -284,8 +292,16 @@ def process_audio(file_path: str) -> Dict[str, Any]:
             except Exception:
                 pass
 
+    # The local path listens to every segment; Gemini remains a legacy option.
+    audio_chunks = []
+    if settings.LOCAL_FAST_MODE and plan.strategy == "direct":
+        from app.services.audio_service import build_audio_chunks
+        audio_chunks = build_audio_chunks(path)
+        duration_sec = audio_chunks[-1]["_embedding_provenance"]["end_seconds"]
+        duration_str = _format_duration(duration_sec)
+
     # Deep AI Audio Content & Lyrics Analysis via Gemini
-    ai_analysis = _analyze_audio_with_gemini(path)
+    ai_analysis = _analyze_audio_with_gemini(path) if plan.strategy == "direct" else None
 
     # Build comprehensive structured text
     text_lines = [
@@ -326,6 +342,8 @@ def process_audio(file_path: str) -> Dict[str, Any]:
         text_lines.append(f"Companion Transcript & Lyrics:\n{sidecar_text}")
     if ai_analysis:
         text_lines.append(f"\nDeep Audio Content & Scene Analysis:\n{ai_analysis}")
+    if plan.transcript:
+        text_lines.append(f"Transcript ({', '.join(plan.sources)}):\n{plan.transcript}")
 
     extracted_text = "\n".join(text_lines).strip()
 
@@ -355,7 +373,8 @@ def process_audio(file_path: str) -> Dict[str, Any]:
         entities.append({"entity_type": "topic", "entity_value": genre})
     entities.append({"entity_type": "technology", "entity_value": codec})
     entities.append({"entity_type": "topic", "entity_value": "Audio"})
-    entities.append({"entity_type": "topic", "entity_value": "Song"})
+    if genre or movie_name:
+        entities.append({"entity_type": "topic", "entity_value": "Song"})
 
     # Semantic Chunks embedded via EmbeddingGemma
     chunks: List[Dict[str, Any]] = [
@@ -365,7 +384,7 @@ def process_audio(file_path: str) -> Dict[str, Any]:
                 f"Movie / Film: {movie_name or 'N/A'}\n"
                 f"Artist / Singer: {artist or 'N/A'}\n"
                 f"Composer: {composer or 'N/A'}\n"
-                f"Genre: {genre or 'Music'}\n"
+                f"Genre: {genre or 'Unknown'}\n"
                 f"Year: {year or 'N/A'}\n"
                 f"Duration: {duration_str}"
             ),
@@ -381,7 +400,9 @@ def process_audio(file_path: str) -> Dict[str, Any]:
         (ai_analysis if ai_analysis else "")
     ).strip()
 
-    if full_transcript:
+    if plan.transcript:
+        chunks.extend(transcript_chunks(plan))
+    elif full_transcript:
         # Split into ~700 char chunks with paragraph preservation
         paragraphs = [p.strip() for p in full_transcript.split("\n\n") if p.strip()]
         current_chunk = []
@@ -403,6 +424,8 @@ def process_audio(file_path: str) -> Dict[str, Any]:
                 "slide_number": None,
             })
 
+    chunks.extend(audio_chunks)
+
     return {
         "extracted_text": extracted_text,
         "summary": summary,
@@ -423,5 +446,8 @@ def process_audio(file_path: str) -> Dict[str, Any]:
             "sample_rate": sample_rate,
             "channels": channels,
             "bit_rate": bit_rate,
+            "audio_segments": len(audio_chunks),
+            "content_indexing": "direct_audio" if audio_chunks else "text_only",
+            "text_sources": list(plan.sources),
         }
     }

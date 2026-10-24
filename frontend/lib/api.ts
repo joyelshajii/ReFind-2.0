@@ -3,6 +3,7 @@ import {
   ContextDetailResponse,
   IndexProgressStatus,
   IndexStats,
+  MediaIndexJob,
   IndexedDocumentItem,
   DuplicateOverviewResponse,
   ResolveGroupResponse,
@@ -143,11 +144,13 @@ export async function deleteAllDocuments(): Promise<{
   }, "Failed to clear indexed files");
 }
 
-export async function triggerIndexing(folderPath?: string): Promise<{ status: string; message: string; files_found: number }> {
+export async function triggerIndexing(folderPath: string): Promise<{ status: string; message: string; files_found: number }> {
+  const selectedPath = folderPath.trim();
+  if (!selectedPath) throw new Error("Choose a folder to index. A folder path is required.");
   return requestJson<{ status: string; message: string; files_found: number }>("/api/index", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(folderPath ? { folder_path: folderPath } : {}),
+    body: JSON.stringify({ folder_path: selectedPath }),
   }, "Failed to trigger indexing");
 }
 
@@ -156,22 +159,32 @@ export async function uploadFiles(formData: FormData): Promise<{
   message: string;
   files?: Array<{ id: string; filename: string; file_type: string; file_size: number }>;
   failed_files?: Array<{ filename: string; error: string }>;
+  deferred_files?: MediaIndexJob[];
+  companions_saved?: number;
 }> {
   return requestJson<{
     status: string;
     message: string;
     files?: Array<{ id: string; filename: string; file_type: string; file_size: number }>;
     failed_files?: Array<{ filename: string; error: string }>;
+    deferred_files?: MediaIndexJob[];
+    companions_saved?: number;
   }>("/api/index/upload", {
     method: "POST",
     body: formData,
   }, "Failed to upload files");
 }
 
-export async function seedDemoData(): Promise<{ status: string; message: string; demo_scenario: string }> {
-  return requestJson<{ status: string; message: string; demo_scenario: string }>("/api/demo/seed", {
+export async function getMediaIndexJobs(): Promise<MediaIndexJob[]> {
+  return requestJson<MediaIndexJob[]>("/api/index/media-jobs", { cache: "no-store" }, "Unable to load pending media");
+}
+
+export async function decideMediaIndexJob(id: string, action: "continue" | "schedule" | "skip", scheduledAt?: string): Promise<MediaIndexJob> {
+  return requestJson<MediaIndexJob>(`/api/index/media-jobs/${encodeURIComponent(id)}`, {
     method: "POST",
-  }, "Failed to seed demo data");
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, scheduled_at: scheduledAt }),
+  }, "Unable to update media indexing");
 }
 
 export async function getHealth(): Promise<any> {
@@ -184,6 +197,14 @@ export async function getHealth(): Promise<any> {
 
 export function getDocumentDownloadUrl(documentId: string): string {
   return `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/download`;
+}
+
+export async function openDocument(documentId: string): Promise<void> {
+  await requestJson<{ status: string }>(
+    `/api/documents/${encodeURIComponent(documentId)}/open`,
+    { method: "POST" },
+    "Could not open the original file"
+  );
 }
 
 // ----------------------------------------------------
