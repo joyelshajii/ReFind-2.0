@@ -126,17 +126,23 @@ body {
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.055), 0 0 28px rgba(244, 214, 78, 0.055), 0 12px 40px rgba(0, 0, 0, 0.72) !important;
 }
 
-.refind-search-form.is-focused {
+.refind-search-form.is-focused,
+.refind-search-form:focus-within {
   border-color: rgba(244, 214, 78, 0.9) !important;
   box-shadow: 0 0 0 1px rgba(244, 214, 78, 0.18), 0 0 32px rgba(244, 214, 78, 0.12) !important;
 }
 
-.refind-search-form.is-hovered {
+.refind-search-form.is-hovered:not(:focus-within) {
   border-color: rgba(244, 214, 78, 0.62) !important;
 }
 
 .refind-search-input {
+  min-width: 0;
   caret-color: var(--accent);
+}
+
+.refind-search-form > div:last-child {
+  flex-shrink: 0;
 }
 
 .refind-search-submit {
@@ -169,6 +175,23 @@ body {
 .refind-search-suggestions > button:hover {
   border-color: rgba(244, 214, 78, 0.48);
   background: rgba(244, 214, 78, 0.07);
+}
+
+/* Keep keyboard focus visible without adding a second ring inside search. */
+:where(header, main) :where(a, button, input:not(.refind-search-input), select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The indigo palette is gold in this theme; solid buttons need dark text. */
+button.bg-indigo-600,
+button.bg-indigo-500 {
+  color: #12110d;
+}
+
+main input::placeholder {
+  color: #a1a1aa;
+  opacity: 1;
 }
 
 .refind-home-layout {
@@ -220,6 +243,32 @@ body {
 }
 
 @media (max-width: 640px) {
+  /* Keep all four labeled navigation items inside narrow screens. */
+  header nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  header nav > a {
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  main :is(input[type="text"], input[type="search"], input:not([type]), textarea, select) {
+    font-size: 1rem;
+  }
+
+  .refind-search-suggestions > button {
+    min-height: 44px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .refind-search-submit {
+    min-height: 44px;
+  }
+
   .refind-home-layout {
     padding-top: 2.5rem;
   }
