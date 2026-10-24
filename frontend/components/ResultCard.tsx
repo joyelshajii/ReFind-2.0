@@ -10,7 +10,9 @@ import {
   Layers,
   Sparkles,
   Download,
-  Info
+  Info,
+  Music,
+  Video
 } from "lucide-react";
 import { SearchResultItem } from "@/types";
 import { getDocumentDownloadUrl } from "@/lib/api";
@@ -48,6 +50,26 @@ export default function ResultCard({
       case "heic":
       case "heif":
         return <ImageIcon className="w-5 h-5 text-emerald-400/90" />;
+      case "mp3":
+      case "wav":
+      case "m4a":
+      case "flac":
+      case "aac":
+      case "ogg":
+      case "wma":
+      case "opus":
+      case "audio":
+        return <Music className="w-5 h-5 text-purple-400/90" />;
+      case "mp4":
+      case "mkv":
+      case "avi":
+      case "mov":
+      case "wmv":
+      case "webm":
+      case "flv":
+      case "m4v":
+      case "video":
+        return <Video className="w-5 h-5 text-rose-400/90" />;
       default:
         return <FileCode className="w-5 h-5 text-zinc-400" />;
     }

@@ -34,6 +34,32 @@ KNOWN_FILE_TYPES = {
     "tiff": "tiff",
     "heic": "heic",
     "heif": "heif",
+    # Audio
+    "mp3": "mp3",
+    "wav": "wav",
+    "m4a": "m4a",
+    "flac": "flac",
+    "aac": "aac",
+    "ogg": "ogg",
+    "wma": "wma",
+    "opus": "opus",
+    "audio": "audio",
+    "song": "audio",
+    "music": "audio",
+    "podcast": "audio",
+    # Video
+    "mp4": "mp4",
+    "mkv": "mkv",
+    "avi": "avi",
+    "mov": "mov",
+    "wmv": "wmv",
+    "webm": "webm",
+    "flv": "flv",
+    "m4v": "m4v",
+    "video": "video",
+    "movie": "video",
+    "film": "video",
+    "clip": "video",
 }
 
 MONTHS = [
@@ -88,10 +114,13 @@ def parse_query_local(query: str) -> QueryClues:
     detected_time_clues: List[str] = []
     detected_keywords: List[str] = []
 
-    # 1. Detect file type. Natural image descriptions mean any supported
-    # image format, not only PNG.
+    # 1. Detect file type. Natural image/video/audio descriptions mean any supported format.
     if re.search(r"\b(?:image|photo|picture|screenshot)\b", lower_q):
         detected_file_type = "image"
+    elif re.search(r"\b(?:video|movie|film|clip)\b", lower_q):
+        detected_file_type = "video"
+    elif re.search(r"\b(?:audio|song|track|music|voice|podcast|sound)\b", lower_q):
+        detected_file_type = "audio"
 
     for token, ftype in KNOWN_FILE_TYPES.items():
         pattern = r"\b" + re.escape(token) + r"\b"

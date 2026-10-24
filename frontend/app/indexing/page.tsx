@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, useRef, useCallback, ChangeEvent, DragEvent, useTransition } from "react";
 import {
   FolderGit2,
@@ -21,7 +22,10 @@ import {
   Calendar,
   Clock,
   Filter,
-  AlertTriangle
+  AlertTriangle,
+  Music,
+  Video,
+  Copy
 } from "lucide-react";
 import IndexProgress from "@/components/IndexProgress";
 import {
@@ -37,7 +41,7 @@ import {
 } from "@/lib/api";
 import { IndexProgressStatus, IndexedDocumentItem } from "@/types";
 
-const SUPPORTED_FORMATS = ["PDF", "DOCX", "PPTX", "TXT", "PNG", "JPG", "JPEG", "WEBP", "GIF", "BMP", "TIFF", "HEIC", "HEIF"];
+const SUPPORTED_FORMATS = ["PDF", "DOCX", "PPTX", "TXT", "PNG", "JPG", "JPEG", "WEBP", "GIF", "BMP", "TIFF", "HEIC", "HEIF", "MP4", "MKV", "AVI", "MOV", "WEBM", "MP3", "WAV", "M4A", "FLAC", "AAC", "OGG"];
 
 export default function IndexingPage() {
   const [status, setStatus] = useState<IndexProgressStatus>({
@@ -252,6 +256,26 @@ export default function IndexingPage() {
       case "heic":
       case "heif":
         return <ImageIcon className="w-4 h-4 text-emerald-400/90" />;
+      case "mp3":
+      case "wav":
+      case "m4a":
+      case "flac":
+      case "aac":
+      case "ogg":
+      case "wma":
+      case "opus":
+      case "audio":
+        return <Music className="w-4 h-4 text-purple-400/90" />;
+      case "mp4":
+      case "mkv":
+      case "avi":
+      case "mov":
+      case "wmv":
+      case "webm":
+      case "flv":
+      case "m4v":
+      case "video":
+        return <Video className="w-4 h-4 text-rose-400/90" />;
       default:
         return <FileCode className="w-4 h-4 text-zinc-400" />;
     }
@@ -465,6 +489,14 @@ export default function IndexingPage() {
           </div>
 
           <div className="self-start sm:self-auto flex items-center gap-2">
+            <Link
+              href="/duplicates"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/25 hover:bg-indigo-600/40 text-sm font-mono text-indigo-200 border border-indigo-500/35 transition-all shadow-[0_0_12px_rgba(99,102,241,0.2)]"
+              title="Detect and manage duplicate files"
+            >
+              <Copy className="w-4 h-4 text-indigo-300" />
+              <span>Duplicates</span>
+            </Link>
             <button
               onClick={loadDocuments}
               disabled={isLoadingDocs || isClearingIndex}
@@ -500,7 +532,7 @@ export default function IndexingPage() {
           </div>
 
           <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-            {["all", "pdf", "docx", "pptx", "png", "jpg", "webp", "gif", "bmp", "tiff", "txt"].map((fmt) => (
+            {["all", "pdf", "docx", "pptx", "png", "jpg", "video", "audio", "txt"].map((fmt) => (
               <button
                 key={fmt}
                 onClick={() => setSelectedFormat(fmt)}

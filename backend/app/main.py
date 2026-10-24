@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import settings
 from app.db.base import init_db
-from app.api import search, documents, index, demo, health
+from app.api import search, documents, index, demo, health, duplicates
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,6 +75,7 @@ app.include_router(health.router)
 app.include_router(search.router)
 app.include_router(documents.router)
 app.include_router(index.router)
+app.include_router(duplicates.router)
 app.include_router(demo.router)
 
 @app.get("/")

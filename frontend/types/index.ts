@@ -91,3 +91,51 @@ export interface IndexedDocumentItem {
   entities: { id?: string; entity_type: string; entity_value: string }[];
   chunk_count: number;
 }
+
+export interface DuplicateFileItem {
+  id: string;
+  filename: string;
+  filepath: string;
+  file_type: string;
+  file_size: number;
+  modified_at: string;
+  created_at: string;
+  is_recommended: boolean;
+  recommendation_reason: string;
+  exists_on_disk: boolean;
+}
+
+export interface DuplicateGroup {
+  group_id: string;
+  match_type: "exact_hash" | "exact_text" | "filename_and_content" | "similar_content" | string;
+  match_label: string;
+  confidence: number;
+  why_duplicate: string;
+  differences: string;
+  potential_savings_bytes: number;
+  recommended_document_id: string;
+  files: DuplicateFileItem[];
+}
+
+export interface DuplicateOverviewResponse {
+  total_groups: number;
+  total_duplicate_files: number;
+  total_reclaimable_bytes: number;
+  groups: DuplicateGroup[];
+}
+
+export interface ResolveGroupResponse {
+  status: string;
+  message: string;
+  kept_document_id: string;
+  deleted_count: number;
+  freed_bytes: number;
+}
+
+export interface ResolveAllResponse {
+  status: string;
+  message: string;
+  groups_resolved: number;
+  total_deleted: number;
+  freed_bytes: number;
+}

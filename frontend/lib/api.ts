@@ -3,7 +3,10 @@ import {
   ContextDetailResponse,
   IndexProgressStatus,
   IndexStats,
-  IndexedDocumentItem
+  IndexedDocumentItem,
+  DuplicateOverviewResponse,
+  ResolveGroupResponse,
+  ResolveAllResponse
 } from "@/types";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
@@ -181,4 +184,60 @@ export async function getHealth(): Promise<any> {
 
 export function getDocumentDownloadUrl(documentId: string): string {
   return `${API_BASE_URL}/api/documents/${encodeURIComponent(documentId)}/download`;
+}
+
+// ----------------------------------------------------
+// Duplicate Files Detection & Management APIs
+// ----------------------------------------------------
+
+export async function getDuplicates(minSimilarity: number = 0.85): Promise<DuplicateOverviewResponse> {
+  const params = new URLSearchParams({ min_similarity: minSimilarity.toString() });
+  return requestJson<DuplicateOverviewResponse>(
+    `/api/duplicates?${params.toString()}`,
+    { cache: "no-store" },
+    "Failed to fetch duplicate files overview"
+  );
+}
+
+export async function deleteDuplicateFile(
+  documentId: string,
+  deleteFromDisk: boolean = true
+): Promise<{ status: string; message: string; document_id: string; filename: string; disk_deleted: boolean }> {
+  const params = new URLSearchParams({ delete_from_disk: deleteFromDisk.toString() });
+  return requestJson<{ status: string; message: string; document_id: string; filename: string; disk_deleted: boolean }>(
+    `/api/duplicates/${encodeURIComponent(documentId)}?${params.toString()}`,
+    { method: "DELETE" },
+    "Failed to delete duplicate file"
+  );
+}
+
+export async function resolveDuplicateGroup(
+  keepDocumentId: string,
+  deleteDocumentIds?: string[],
+  deleteFromDisk: boolean = true
+): Promise<ResolveGroupResponse> {
+  return requestJson<ResolveGroupResponse>(
+    "/api/duplicates/resolve-group",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        keep_document_id: keepDocumentId,
+        delete_document_ids: deleteDocumentIds,
+        delete_from_disk: deleteFromDisk,
+      }),
+    },
+    "Failed to resolve duplicate group"
+  );
+}
+
+export async function resolveAllDuplicates(
+  deleteFromDisk: boolean = true
+): Promise<ResolveAllResponse> {
+  const params = new URLSearchParams({ delete_from_disk: deleteFromDisk.toString() });
+  return requestJson<ResolveAllResponse>(
+    `/api/duplicates/resolve-all?${params.toString()}`,
+    { method: "POST" },
+    "Failed to resolve all duplicate files"
+  );
 }

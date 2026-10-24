@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, FolderGit2, Settings, Sparkles } from "lucide-react";
+import { Search, FolderGit2, Settings, Sparkles, Copy } from "lucide-react";
 import { getHealth } from "@/lib/api";
 
 export default function Navbar() {
@@ -17,6 +17,7 @@ export default function Navbar() {
   const navItems = [
     { label: "Search", href: "/", icon: Search },
     { label: "Indexing", href: "/indexing", icon: FolderGit2 },
+    { label: "Duplicates", href: "/duplicates", icon: Copy },
     { label: "Settings", href: "/settings", icon: Settings },
   ];
 

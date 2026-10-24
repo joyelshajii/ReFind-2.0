@@ -29,10 +29,17 @@ def list_documents(
         query = query.filter(Document.filename.ilike(f"%{search}%"))
     if file_type:
         requested_type = file_type.lower().lstrip(".")
-        query = query.filter(or_(
-            Document.file_type == requested_type,
-            func.lower(Document.filepath).endswith(f".{requested_type}", autoescape=True),
-        ))
+        if requested_type == "audio":
+            query = query.filter(Document.file_type.in_({"mp3", "wav", "m4a", "flac", "aac", "ogg", "wma", "opus"}))
+        elif requested_type == "video":
+            query = query.filter(Document.file_type.in_({"mp4", "mkv", "avi", "mov", "wmv", "webm", "flv", "m4v"}))
+        elif requested_type == "image":
+            query = query.filter(Document.file_type.in_({"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"}))
+        else:
+            query = query.filter(or_(
+                Document.file_type == requested_type,
+                func.lower(Document.filepath).endswith(f".{requested_type}", autoescape=True),
+            ))
     # Do not expose stale index rows for files that were moved or deleted.
     # Search already applies the same guard; the file browser must stay
     # consistent with search and download behavior.

@@ -19,6 +19,8 @@ from app.core.config import settings
 logger = logging.getLogger("refind.services.hybrid_search")
 
 IMAGE_TYPES = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"}
+AUDIO_TYPES = {"mp3", "wav", "m4a", "flac", "aac", "ogg", "wma", "opus"}
+VIDEO_TYPES = {"mp4", "mkv", "avi", "mov", "wmv", "webm", "flv", "m4v"}
 
 def _extract_snippet(text: str, keywords: List[str], max_len: int = 220) -> str:
     """
@@ -131,9 +133,9 @@ def search_documents(
             clues.file_type.lower() in {
                 doc.file_type.lower(), Path(doc.filepath).suffix.lstrip(".").lower()
             }
-            or (clues.file_type.lower() == "image" and doc.file_type.lower() in {
-                "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "heic", "heif"
-            })
+            or (clues.file_type.lower() == "image" and doc.file_type.lower() in IMAGE_TYPES)
+            or (clues.file_type.lower() == "audio" and doc.file_type.lower() in AUDIO_TYPES)
+            or (clues.file_type.lower() == "video" and doc.file_type.lower() in VIDEO_TYPES)
         ):
             candidate_map[doc.id] = doc
 
@@ -210,14 +212,22 @@ def search_documents(
         if clues.file_type:
             meta_checks += 1
             source_type = Path(doc.filepath).suffix.lstrip(".").lower()
-            type_matches = (
-                doc.file_type.lower() in IMAGE_TYPES
-                if clues.file_type.lower() == "image"
-                else clues.file_type.lower() in {doc.file_type.lower(), source_type}
-            )
+            ft_req = clues.file_type.lower()
+            if ft_req == "image":
+                type_matches = doc.file_type.lower() in IMAGE_TYPES or source_type in IMAGE_TYPES
+                clue_label = "IMAGE"
+            elif ft_req == "audio":
+                type_matches = doc.file_type.lower() in AUDIO_TYPES or source_type in AUDIO_TYPES
+                clue_label = "AUDIO"
+            elif ft_req == "video":
+                type_matches = doc.file_type.lower() in VIDEO_TYPES or source_type in VIDEO_TYPES
+                clue_label = "VIDEO"
+            else:
+                type_matches = ft_req in {doc.file_type.lower(), source_type}
+                clue_label = ft_req.upper()
+
             if type_matches:
                 meta_score += 1.0
-                clue_label = "IMAGE" if clues.file_type.lower() == "image" else clues.file_type.upper()
                 matching_clues.append(clue_label)
                 evidence_list.append(EvidenceItem(
                     clue_name=clue_label,
